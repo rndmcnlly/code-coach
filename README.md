@@ -4,7 +4,7 @@ A computational caricature of a live programming coach for game development.
 
 ## Inspiration
 
-This prototype grew out of a Live-Coaches project that pairs an AI coach with a Super Metroid emulator: the coach watches gameplay via frame captures and memory reads, then reacts with spoken guidance. The question was: can the same "live coach" concept transfer from game-playing to game-making?
+This prototype grew out of a [Live-Coaches](https://github.com/ivalmart/Live-Coaches) project that pairs an AI coach with a Super Metroid emulator: the coach watches gameplay via frame captures and memory reads, then reacts with spoken guidance. The question was: can the same "live coach" concept transfer from game-playing to game-making?
 
 The deeper motivation comes from the **Live Coding (LC)** tradition in music and performance, where the act of writing code is itself the performance. In LC, the audience sees the code as it forms, and the performer's edits are the expressive medium. We wanted to explore what happens when you put an AI in the position of a live audience member who also happens to be a domain expert: watching the code take shape, reacting to structural changes, occasionally pointing at something and commenting.
 
@@ -12,7 +12,7 @@ The framing is deliberately a **computational caricature**, not a production sys
 
 ## Concept
 
-The student writes Phaser 4 game code in a Monaco editor. An AI coach (Gemini 3 Flash) watches in real time, parsing the code with tree-sitter every second to detect when the AST stabilizes after edits. When it detects a meaningful structural change (including identifier renames that preserve AST structure), it reacts: a short spoken observation, an annotation on the relevant code span, or silence.
+The student writes Phaser 4 game code in a Monaco editor. An AI coach watches in real time, parsing the code with tree-sitter every second to detect when the AST stabilizes after edits. When it detects a meaningful structural change (including identifier renames that preserve AST structure), it reacts: a short spoken observation, an annotation on the relevant code span, or silence.
 
 The interaction model is **point-and-talk**:
 
@@ -23,7 +23,9 @@ The interface has a **four-panel layout**: code editor (dominant), game preview 
 
 ## Design Decisions
 
-**Single-file HTML.** Optimized for pedagogical legibility and portability. Everything (editor, parser, AI integration, TTS/STT, tool system, game preview, todo list, particle effects, WebAudio feedback) lives in one file. Serve it with any static HTTP server.
+**Single-file HTML with Web Components.** The application is a single `index.html` with 9 custom elements defined inline. Each component (editor, agent, AST watcher, game preview, todo list, chat, speech, particles, sound effects) is a `class ... extends HTMLElement` with its own state and methods. A boot orchestrator wires them together via `CustomEvent` dispatch on `document`. No build step, no bundler: serve it with any static HTTP server.
+
+**OpenAI-compatible LLM via BayLeaf API.** The `<coach-agent>` element makes direct `fetch` calls to `api.bayleaf.dev/v1/chat/completions`, an OpenAI-compatible proxy for UC Santa Cruz. On the campus network, no API key is needed. Off campus, a free BayLeaf key (`sk-bayleaf-...`) is required. The default model is `qwen/qwen3.5-35b-a3b` (vision-capable). The agent manages its own message history and tool-calling loop using the standard OpenAI `tool_calls` / `tool` role protocol.
 
 **AST polling, not file-watching.** The coach re-parses once per second and compares S-expressions to detect stability. This is intentionally coarse: we want to react at the level of "you added a function" or "you changed the config," not "you typed a semicolon." Two consecutive identical parses trigger a coach reaction. Text-only changes (renames) that preserve AST structure are also detected by comparing raw code against the last coached snapshot.
 
@@ -46,33 +48,47 @@ The interface has a **four-panel layout**: code editor (dominant), game preview 
 ## Architecture
 
 ```
-Browser
+Browser (single-file, 9 custom elements)
+
 +--------------------+-----------+----------+
-|  Monaco Editor     | Tasks     | Log      |
-|  (code + gutter    | (todo     | (chat    |
-|   annotations)     |  list)    |  sidebar)|
+|  <code-editor>     | <todo-    | <coach-  |
+|  Monaco + gutter   |  list>    |  chat>   |
+|  annotations +     |           | Log +    |
+|  quick-fix widgets |           | input    |
 |                    |           |          |
-| [tree-sitter polls |           |          |
-|  AST every 1s]     |           |          |
-|                    |           |          |
-| [input: select +   |           |          |
-|  type/speak]       |           |          |
+| <ast-watcher>      |           |          |
+|  tree-sitter polls |           |          |
+|  AST every 1s      |           |          |
 +--------------------+           |          |
-|  Game Preview      |           |          |
-|  (Phaser iframe)   |           |          |
-| [console capture]  |           |          |
+|  <game-preview>    |           |          |
+|  Phaser iframe +   |           |          |
+|  console capture   |           |          |
 +--------------------+-----------+----------+
          |                          ^
-         | AST diff + code +        | text + tool calls
+         | code-context event:      | agent-response event:
+         | AST diff + code +        | text + tool-calls
          | cursor + console +       |
          | todo state               |
          v                          |
-   Gemini 3 Flash (function calling)
+   <coach-agent>
+   OpenAI-compatible chat/completions
+   via api.bayleaf.dev/v1
+   Model: qwen/qwen3.5-35b-a3b
+
    Tools: get_code, highlight_lines,
           edit_code, clear_highlights,
           suggest_fix, run_preview,
+          screenshot_preview,
           add_todo, complete_todo,
           remove_todo
+
+Other elements:
+  <speech-io>    Browser TTS + push-to-talk STT
+  <sfx-engine>   WebAudio synth sounds
+  <particle-fx>  Canvas overlay particles
+
+Boot orchestrator wires all components via
+CustomEvents on document.
 ```
 
 ## Tool Inventory
@@ -85,16 +101,16 @@ Browser
 | `suggest_fix` | One-click | Propose an inline quick-fix (Apply/Dismiss buttons on the line) |
 | `edit_code` | Judgment | Replace a range of lines (student-requested: just do it; coach-initiated: ask first) |
 | `run_preview` | Ask first | Execute the student's code in the game preview iframe |
+| `screenshot_preview` | No | Capture game canvas screenshot (bundled with console logs, sent as vision input) |
 | `add_todo` | No | Add a task to the student's todo list |
 | `complete_todo` | No | Mark a task done (auto-checked as coach observes code) |
 | `remove_todo` | No | Remove an irrelevant task |
 
 ## Voice and Feedback
 
-Three voice modes via dropdown:
+Two voice modes via dropdown:
 - **Off**: captions only (text overlay at bottom of screen)
-- **Fast**: browser Web Speech API (instant, robotic)
-- **Best**: Gemini 3.1 Flash TTS (high quality, some latency, Kore voice, falls back to browser on error)
+- **On**: browser Web Speech API (instant)
 
 Sound effects (toggleable SFX button):
 - Todo item added: quick ascending sine blip
@@ -113,17 +129,19 @@ The bottom of the editor pane contains a sandboxed iframe that runs the student'
 - Console methods (`log`, `warn`, `error`) are patched to `postMessage` back to the parent
 - Uncaught errors and unhandled promise rejections are captured
 - Console output appears below the iframe and is included in code updates to the coach
+- Screenshots bundle console output alongside the image for full runtime context
+- **Share logs** button sends console output to the coach on demand (for runtime errors from interactive play that occur after the last code edit)
 - No auto-run: the student clicks Run or presses Ctrl+Enter
 
 ## Dependencies (all loaded from CDN)
 
 - **Monaco Editor** 0.52.2: code editor with glyph margin, decorations, content widgets
 - **web-tree-sitter** 0.24.7 + **tree-sitter-javascript** 0.23.1: AST parsing (UMD from unpkg)
-- **@google/genai**: Gemini SDK (function calling with `id` passthrough for Gemini 3, chat sessions)
-- **Gemini 3.1 Flash TTS**: optional high-quality voice (PCM audio decoded and played via WebAudio)
 - **marked**: markdown rendering in the log sidebar
 - **Web Speech API**: browser-native TTS and STT
 - **Phaser 4.0.0**: loaded in the preview iframe from CDN
+
+LLM inference via [BayLeaf API](https://api.bayleaf.dev) (OpenAI-compatible, zero-data-retention).
 
 ## Running
 
@@ -134,30 +152,32 @@ python3 -m http.server 8888
 open http://localhost:8888
 ```
 
-Requires `GEMINI_API_KEY` in `localStorage`. Set it in the browser console:
+**On the UCSC campus network**: no setup needed. The BayLeaf API accepts requests without authentication.
+
+**Off campus**: get a free API key at [api.bayleaf.dev](https://api.bayleaf.dev), then set it in the browser console:
 ```javascript
-localStorage.setItem("GEMINI_API_KEY", "your-key-here")
+localStorage.setItem("BAYLEAF_API_KEY", "sk-bayleaf-...")
 ```
 
 ## Progress
-
-Built in a single session as a proof of concept.
 
 - [x] Monaco editor with Phaser 4 starter code
 - [x] Tree-sitter WASM parsing with AST diff on stabilization
 - [x] Text-only change detection (identifier renames that preserve AST structure)
 - [x] Cursor line included in every code update
-- [x] Gemini 3 Flash integration with function calling (tools with `id` passthrough)
+- [x] OpenAI-compatible LLM integration with tool calling via BayLeaf API
 - [x] Coach reacts to code changes with short spoken observations (15-word cap)
 - [x] Annotation system: highlight lines, trailing `::after` text, hover tooltips, docs links
 - [x] Dismissable annotations via gutter X click, with coach notification
 - [x] Quick-fix system: inline Apply/Dismiss widget for one-click corrections
 - [x] Point-and-talk: student selection included as context in messages
-- [x] Three-mode TTS: off, browser (fast), Gemini 3.1 Flash TTS (best)
+- [x] Browser TTS (Web Speech API)
 - [x] STT input (Web Speech Recognition, mic button + Space push-to-talk)
 - [x] Judgment-based consent for code edits
 - [x] Game preview iframe with Phaser 4 CDN and console capture
 - [x] Coach-triggered run via `run_preview` tool (with particle effect)
+- [x] Screenshot capture sent to coach as vision input (with console logs bundled)
+- [x] Share Logs button for runtime errors from interactive play
 - [x] Todo list maintained silently by the coach (add, complete, remove)
 - [x] WebAudio sound effects for todo interactions (toggleable)
 - [x] Particle effects on annotations and coach-triggered runs
@@ -166,12 +186,17 @@ Built in a single session as a proof of concept.
 - [x] Phaser 4 docs URL pattern in system prompt (lowercase hash fragment quirk)
 - [x] Naming and style awareness (casing, spelling, clarity of identifiers)
 - [x] 1-indexed line numbers in all code sent to the model
+- [x] Web Components architecture (9 custom elements + boot orchestrator)
 - [ ] Multiple annotation layers (currently one highlight at a time)
 - [ ] Persistent coach memory across page reloads
 - [ ] Configurable coach persona
 - [ ] Richer AST diff (tree edit distance instead of top-level S-expression comparison)
-- [ ] Screenshot of the game preview sent to the coach for visual feedback
+
+## Credits
+
+- [Adam Smith](https://github.com/rndmcnlly) (amsmith@ucsc.edu)
+- [Ivan Martinez-Arias](https://github.com/ivalmart) (ivalmart@ucsc.edu)
 
 ## Status
 
-This is a single-session proof of concept, not a production system.
+This is a research proof of concept, not a production system.
