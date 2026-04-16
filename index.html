@@ -1,0 +1,1916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Code Coach: Live Programming Guide</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #1e1e1e; color: #d4d4d4;
+    height: 100vh; display: flex; flex-direction: column;
+  }
+
+  /* Top bar */
+  #topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 12px; background: #252526; border-bottom: 1px solid #333;
+    font-size: 13px; flex-shrink: 0;
+  }
+  #topbar .title { font-weight: 600; color: #569cd6; }
+  #ast-status {
+    padding: 2px 8px; border-radius: 10px; font-size: 11px;
+    background: #333; color: #888; transition: all 0.3s;
+  }
+  #ast-status.editing { background: #6644; color: #ce9178; }
+  #ast-status.stable { background: #2644; color: #6a9955; }
+  #ast-status.error { background: #4224; color: #f44747; }
+  #topbar .spacer { flex: 1; }
+  #topbar button {
+    background: #333; border: 1px solid #555; color: #d4d4d4;
+    padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;
+  }
+  #topbar button:hover { background: #444; }
+  #topbar button.active { background: #264f78; border-color: #569cd6; }
+  #topbar select {
+    background: #333; border: 1px solid #555; color: #d4d4d4;
+    padding: 3px 6px; border-radius: 4px; font-size: 12px; cursor: pointer;
+  }
+
+  /* Main layout */
+  #main { display: flex; flex: 1; overflow: hidden; }
+
+  /* Editor pane (top: code, bottom: preview) */
+  #editor-pane { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  #monaco-container { flex: 3; min-height: 0; }
+
+  /* Game preview area */
+  #preview-area {
+    flex: 2; display: flex; flex-direction: column; min-height: 0;
+    border-top: 1px solid #333;
+  }
+  #preview-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 10px; background: #252526; border-bottom: 1px solid #333;
+    font-size: 11px; color: #666; flex-shrink: 0;
+  }
+  #preview-bar button {
+    background: #6a9955; border: none; color: #fff;
+    padding: 2px 12px; border-radius: 3px; cursor: pointer; font-size: 11px;
+    font-weight: 600;
+  }
+  #preview-bar button:hover { background: #7fbf66; }
+  #preview-bar .auto-label { color: #555; font-size: 10px; }
+  #preview-bar .auto-label input { vertical-align: middle; }
+  #game-iframe {
+    flex: 1; border: none; background: #000; min-height: 0;
+  }
+  #console-area {
+    max-height: 80px; overflow-y: auto; padding: 4px 10px;
+    background: #1a1a1a; font-size: 11px; font-family: 'Cascadia Code', 'Fira Code', monospace;
+    border-top: 1px solid #333; flex-shrink: 0;
+  }
+  #console-area:empty { display: none; }
+  .console-line { padding: 1px 0; color: #888; }
+  .console-line.error { color: #f44747; }
+  .console-line.warn { color: #ce9178; }
+
+  /* Coach pane (narrow log sidebar) */
+  #coach-pane {
+    width: 280px; display: flex; flex-direction: column;
+    border-left: 1px solid #333; background: #1a1a1a;
+    opacity: 0.85;
+  }
+  #coach-header {
+    padding: 4px 10px; background: #252526; border-bottom: 1px solid #333;
+    font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  #chat-log {
+    flex: 1; overflow-y: auto; padding: 8px 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .msg {
+    padding: 4px 8px; border-radius: 4px; font-size: 11px;
+    line-height: 1.4; max-width: 100%; word-wrap: break-word;
+  }
+  .msg.coach {
+    background: #264f7844; color: #aaa; align-self: flex-start;
+    border-left: 2px solid #569cd644;
+  }
+  .msg.user {
+    background: #33333344; color: #aaa; align-self: flex-end;
+    border-right: 2px solid #6a995544;
+  }
+  .msg.system {
+    background: transparent; color: #555; align-self: center;
+    font-style: italic; font-size: 10px; text-align: center;
+  }
+  .msg.coach .label { font-size: 9px; color: #569cd666; margin-bottom: 1px; }
+  .msg.user .label { font-size: 9px; color: #6a995566; margin-bottom: 1px; text-align: right; }
+  .msg.context {
+    background: #1a1a2e; color: #666; align-self: stretch;
+    font-size: 11px; font-family: 'Cascadia Code', 'Fira Code', monospace;
+    border-left: 3px solid #444; padding: 0;
+  }
+  .msg.context summary {
+    padding: 5px 8px; cursor: pointer; color: #888;
+    font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px;
+  }
+  .msg.context summary:hover { color: #aaa; }
+  .msg.context pre {
+    margin: 0; padding: 6px 8px; white-space: pre-wrap;
+    word-break: break-all; max-height: 200px; overflow-y: auto;
+    border-top: 1px solid #333;
+  }
+  .msg.context .ctx-badge {
+    display: inline-block; padding: 1px 5px; border-radius: 3px;
+    font-size: 10px; margin-right: 4px;
+  }
+  .msg.context .ctx-badge.ok { background: #1a3a1a; color: #6a9955; }
+  .msg.context .ctx-badge.err { background: #3a1a1a; color: #f44747; }
+
+  /* Input area (below editor) */
+  #input-area {
+    display: flex; gap: 6px; padding: 6px 12px; align-items: center;
+    border-top: 1px solid #333; background: #252526; flex-shrink: 0;
+  }
+  #selection-hint {
+    font-size: 11px; color: #569cd6; white-space: nowrap;
+    max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+  }
+  #selection-hint:empty { display: none; }
+  #user-input {
+    flex: 1; background: #333; border: 1px solid #555; color: #d4d4d4;
+    padding: 6px 10px; border-radius: 4px; font-size: 13px;
+    font-family: inherit; resize: none;
+  }
+  #user-input::placeholder { color: #555; }
+  #send-btn, #mic-btn {
+    background: #333; border: 1px solid #555; color: #d4d4d4;
+    padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px;
+  }
+  #send-btn:hover, #mic-btn:hover { background: #444; }
+  #mic-btn.listening { background: #6b2020; border-color: #f44747; color: #f44747; }
+
+  /* Fullscreen caption overlay */
+  #caption-overlay {
+    display: none; position: fixed; bottom: 40px; left: 50%;
+    transform: translateX(-50%); max-width: 70%; padding: 12px 20px;
+    background: rgba(0,0,0,0.85); color: #fff; font-size: 18px;
+    border-radius: 8px; text-align: center; z-index: 9999;
+    pointer-events: none; line-height: 1.4;
+  }
+  #caption-overlay.visible { display: block; }
+
+  /* Coach annotation: dynamically injected per-highlight (see toolHighlightLines) */
+
+  /* Particle canvas overlay */
+  #particle-canvas {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 9998;
+  }
+
+  /* Quick-fix widget (inline in editor) */
+  .coach-quickfix {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #2d2a1a; border: 1px solid #ce917844;
+    border-radius: 4px; padding: 2px 8px; font-size: 12px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    color: #ce9178; white-space: nowrap;
+  }
+  .coach-quickfix .qf-msg { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+  .coach-quickfix button {
+    border: none; border-radius: 3px; padding: 1px 8px;
+    font-size: 11px; cursor: pointer;
+  }
+  .coach-quickfix .qf-apply {
+    background: #6a9955; color: #fff;
+  }
+  .coach-quickfix .qf-apply:hover { background: #7fbf66; }
+  .coach-quickfix .qf-dismiss {
+    background: transparent; color: #888; border: 1px solid #555;
+  }
+  .coach-quickfix .qf-dismiss:hover { background: #333; color: #ccc; }
+
+  /* Todo pane (middle panel) */
+  #todo-pane {
+    width: 200px; display: flex; flex-direction: column;
+    border-left: 1px solid #333; background: #1e1e1e;
+  }
+  #todo-header {
+    padding: 4px 10px; background: #252526; border-bottom: 1px solid #333;
+    font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  #todo-header .todo-count {
+    background: #569cd633; color: #569cd6; padding: 0 5px;
+    border-radius: 8px; font-size: 10px; margin-left: 4px;
+  }
+  #todo-items {
+    flex: 1; overflow-y: auto; padding: 6px 10px;
+  }
+  #todo-items:empty::after {
+    content: 'Coach will add tasks as you code.';
+    color: #444; font-style: italic; font-size: 11px;
+  }
+  .todo-item {
+    display: flex; align-items: flex-start; gap: 6px;
+    padding: 3px 0; color: #aaa; line-height: 1.4; font-size: 12px;
+  }
+  .todo-item.done { color: #555; }
+  .todo-item.done .todo-text { text-decoration: line-through; }
+  .todo-item .todo-check {
+    width: 14px; height: 14px; border: 1px solid #555;
+    border-radius: 3px; flex-shrink: 0; display: flex;
+    align-items: center; justify-content: center; font-size: 10px;
+    margin-top: 1px;
+  }
+  .todo-item.done .todo-check {
+    background: #6a995533; border-color: #6a9955; color: #6a9955;
+  }
+
+  /* Tool call indicator in chat */
+  .msg.toolcall {
+    background: #1a2a1a; color: #6a9955; align-self: stretch;
+    font-size: 11px; font-family: 'Cascadia Code', 'Fira Code', monospace;
+    border-left: 3px solid #6a9955; padding: 4px 8px;
+  }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <span class="title">Code Coach</span>
+  <span id="ast-status">Initializing...</span>
+  <span class="spacer"></span>
+  <button id="topbar-run-btn" style="background:#6a9955;border-color:#6a9955;color:#fff" title="Run (Ctrl+Enter)">&#9654; Run</button>
+  <select id="tts-select" title="Text-to-speech mode">
+    <option value="off">Voice: Off</option>
+    <option value="browser">Voice: Fast</option>
+    <option value="gemini">Voice: Best</option>
+  </select>
+  <button id="sfx-btn" title="Toggle sound effects">SFX: On</button>
+  <button id="captions-btn" title="Toggle fullscreen captions">Captions: On</button>
+</div>
+
+<div id="main">
+  <div id="editor-pane">
+    <div id="monaco-container"></div>
+    <div id="input-area">
+      <span id="selection-hint"></span>
+      <textarea id="user-input" rows="1" placeholder="Select code and ask about it, or just type... (Enter to send)"></textarea>
+      <button id="mic-btn" title="Hold to talk (or press Space)">Mic</button>
+      <button id="send-btn">Send</button>
+    </div>
+    <div id="preview-area">
+      <div id="preview-bar">
+        <button id="run-btn" title="Run code in preview (Ctrl+Enter)">Run</button>
+        <span>Preview</span>
+        <span style="color:#555;font-size:10px">Ctrl+Enter to run</span>
+        <span style="flex:1"></span>
+        <button id="screenshot-btn" style="background:#333;color:#9cdcfe" title="Send screenshot to coach">Screenshot</button>
+        <button id="clear-console-btn" style="background:#333;color:#888">Clear console</button>
+      </div>
+      <iframe id="game-iframe" sandbox="allow-scripts allow-same-origin"></iframe>
+      <div id="console-area"></div>
+    </div>
+  </div>
+  <div id="todo-pane">
+    <div id="todo-header">Tasks <span class="todo-count" id="todo-count">0</span></div>
+    <div id="todo-items"></div>
+  </div>
+  <div id="coach-pane">
+    <div id="coach-header">Log</div>
+    <div id="chat-log"></div>
+  </div>
+</div>
+
+<div id="caption-overlay"></div>
+<canvas id="particle-canvas"></canvas>
+
+<!-- Monaco Editor from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
+
+<!-- Tree-sitter: load pre-built UMD from unpkg (avoids bundler fs issues) -->
+<script src="https://unpkg.com/web-tree-sitter@0.24.7/tree-sitter.js"></script>
+
+<!-- Gemini SDK + marked from esm.run (matching Live-Coaches pattern) -->
+<script type="module">
+import { GoogleGenAI, Type } from "https://esm.run/@google/genai";
+import { marked } from "https://esm.run/marked";
+
+// =========================================================================
+// Configuration
+// =========================================================================
+const CHAT_MODEL = "gemini-3-flash-preview";
+const POLL_INTERVAL_MS = 1000;
+const STABILITY_THRESHOLD = 2; // consecutive identical ASTs before "stable"
+const DEBOUNCE_AFTER_COACH_MS = 4000; // don't re-trigger coach for N ms after last response
+
+const STARTER_CODE = `// Welcome to Code Coach!
+// Start building your Phaser 4 game here.
+// The coach will react as you code.
+
+const config = {
+  type: Phaser.AUTO,
+  width: 800,
+  height: 600,
+  scene: {
+    preload: preload,
+    create: create,
+    update: update
+  }
+};
+
+const game = new Phaser.Game(config);
+
+function preload() {
+  // Load your assets here
+}
+
+function create() {
+  // Set up your game objects here
+}
+
+function update() {
+  // Game loop logic here
+}
+`;
+
+// =========================================================================
+// System Prompt
+// =========================================================================
+const SYSTEM_PROMPT = `HARD RULE: Every text response must be 15 words or fewer. Spoken aloud by TTS. No exceptions.
+
+# Interaction Model
+This is a point-and-talk interface. The code editor is the shared workspace.
+
+The student communicates by: selecting code spans + speaking or typing a short message. When the student sends a message, you may receive their current selection (lines and code). The selection is what they are pointing at.
+
+You communicate by: speaking short sentences (your text responses) + pointing at code with highlight_lines. Your annotations in the editor ARE your primary visual output. Use them freely.
+
+# Your Role
+Back-seat programmer watching a student build a Phaser 4 game.
+
+On automatic code updates: mostly nod along. Name what changed or flag a bug. Often just "Mhm." or nothing.
+
+When the student selects code and asks about it: use highlight_lines to annotate the relevant span, then speak your answer.
+
+When the student asks you to change code: use judgment about consent. If the request is an explicit instruction ("switch to a class", "refactor this", "fix that bug"), that IS consent, just do it with get_code then edit_code. If you are initiating the change yourself (you noticed a problem and want to fix it), then highlight first and ask before editing.
+
+When the student dismisses an annotation: they have seen it. Acknowledge briefly or stay silent.
+
+# Tools
+Your tools act on the shared editor workspace.
+
+highlight_lines: Your primary output tool. Point at code, annotate it. The annotation appears as subtle trailing text on the line. Use this constantly: to answer questions, flag issues, propose changes, or just to point. The student can dismiss annotations by clicking the X in the gutter.
+
+suggest_fix: Your quick-fix tool. For small, obvious corrections: typos in identifiers, casing fixes, misspellings, missing semicolons. Shows an inline widget with Apply and Dismiss buttons right on the line. The student clicks Apply (one click, no chat) or Dismiss. You get notified either way. Use this instead of edit_code for anything that is a one-spot text replacement on a single line.
+
+edit_code: For larger changes spanning multiple lines. If the student asked for the change, just do it. If you are initiating, highlight first and ask. Always get_code before editing.
+
+clear_highlights: Clean up before placing new ones.
+
+get_code: Read the current source. Use on first turn and before any edit.
+
+run_preview: Run the student's code in the game preview iframe. Loads Phaser 4 from CDN and executes their code. Returns console output. IMPORTANT: Do NOT auto-run. Only use when the student asks to run, or when you want to suggest they try running. If you initiate it, say something like "Want to try running it?" first. The student can also run manually with the Run button or Ctrl+Enter. You see console output in code updates, so you can comment on runtime errors.
+
+screenshot_preview: Capture a screenshot of the game canvas. You will receive the image as a follow-up message. Use to check visual output after a run. The student can also send you a screenshot manually via the Screenshot button. When you receive a screenshot, briefly comment on what you see (sprites, colors, layout) in 15 words or fewer.
+
+# Phaser 4 Knowledge
+Phaser 4.0.0 "Caladan" was released April 10, 2026. Key changes from v3:
+- Pipelines replaced by Render Nodes (node-based renderer, each node handles one task)
+- FX and Masks unified into a single Filter system (Blur, Glow, Shadow, Pixelate, ColorMatrix, Bloom, Vignette, etc.)
+- SpriteGPULayer for rendering millions of sprites in one draw call
+- TilemapGPULayer renders entire tilemap layer as single quad
+- Overhauled Tint system: six modes (MULTIPLY, FILL, ADD, SCREEN, OVERLAY, HARD_LIGHT)
+- New game objects: Gradient, Noise, CaptureFrame, Stamp
+- Simplified lighting: \`sprite.setLighting(true)\`
+- Canvas renderer deprecated (WebGL is primary)
+- \`Phaser.Struct.Set\` replaced with native JS Set
+- \`Point\` replaced by \`Vector2\`
+- \`roundPixels\` defaults to false now
+- Mesh and Plane game objects removed
+- GL orientation used natively (Y=0 at bottom for textures)
+
+The core API (Game, Scene lifecycle, Arcade Physics, input, tweens, timers, audio) remains largely the same as v3. Most tutorials and patterns still apply. The big changes are renderer internals and the Filter system.
+
+# Phaser Docs Links
+The official Phaser 4 docs are at https://docs.phaser.io. The API docs use this URL pattern:
+
+  https://docs.phaser.io/api-documentation/class/{namespace}-{classname}#{method}
+
+IMPORTANT: the hash fragment is always LOWERCASE, even if the actual API uses camelCase. Examples:
+- GameObjects.GameObjectFactory.rectangle -> https://docs.phaser.io/api-documentation/class/gameobjects-gameobjectfactory#rectangle
+- Physics.Arcade.Factory.sprite -> https://docs.phaser.io/api-documentation/class/physics-arcade-factory#sprite  
+- Scene lifecycle (preload, create, update) -> https://docs.phaser.io/api-documentation/class/scene
+- Input.Keyboard.KeyboardPlugin.createCursorKeys -> https://docs.phaser.io/api-documentation/class/input-keyboard-keyboardplugin#createcursorkeys
+- Tweens.TweenManager.add -> https://docs.phaser.io/api-documentation/class/tweens-tweenmanager#add
+
+# Todo List
+You have a todo list you maintain for the student. Use it to track what they are building toward.
+
+add_todo: Add a task when you see a clear next step or when the student mentions a goal. Keep tasks short and concrete ("Add player sprite in create", "Set up keyboard input", "Add collision with enemies"). Add 2-3 starter tasks on the first turn based on what you see in the code.
+
+complete_todo: Mark a task done when the student's code now clearly accomplishes it. Do this silently during automatic code updates. You see the todo list in every update, so check if any pending items are now done. Do not announce completions, just complete them.
+
+remove_todo: Remove a task if it becomes irrelevant (e.g. the student changed direction).
+
+The todo list is visible in the UI. The student hears a sound when items are added or completed.
+
+# Cursor Awareness and Doc Links
+You receive the student's cursor line in every code update. When the cursor is on or near a Phaser API call, consider using highlight_lines with a linkUrl to the relevant docs page. Do not do this on every update, only when the student is working on a new API they might not know well, or when they pause on something. One doc link per session point is enough, do not spam.
+
+# Syntax Errors
+When the code has a parse error, just say where and what, like "Looks like a missing closing brace around line 12."
+
+# First Turn
+Say hi briefly. Something like "I'm here, watching. Start building and I'll follow along." Keep it to one sentence.
+
+# Naming and Style
+Pay attention to identifier names. If you notice inconsistent casing (mixing camelCase and snake_case), misspellings, or unclear names, mention it. Good naming is part of good code. Examples: "playerSpd is a bit cryptic, maybe playerSpeed?" or "You are mixing camelCase and snake_case."
+
+# Examples of Good Responses
+- "Setting up the game config, nice."
+- "Adding cursor keys in create, yep."
+- "Heads up, you are loading that image in update, it should be in preload."
+- "Missing a closing paren on line 8."
+- "plyrHelth is hard to read, maybe playerHealth?"
+- (silence, because the change was just adding a comment)
+
+# Anti-Patterns
+- Do not dump the AST back at the student
+- Do not repeat their code back to them
+- Do not give tutorials or explain concepts unless asked
+- Do not suggest what to build next
+- Do not praise every edit
+- Do not say "Great job!" or "Looking good!" unless something genuinely impressive happened
+- Do not ask questions unless you are truly confused about intent`;
+
+// =========================================================================
+// State
+// =========================================================================
+let editor = null;
+let ai = null;
+let chat = null;
+let chatHistory = [];
+
+let lastCode = "";
+let lastASTSexp = "";
+let lastCoachedSexp = "";
+let lastCoachedCode = "";
+let stableCount = 0;
+let lastCoachTime = 0;
+let isCoachResponding = false;
+
+let ttsMode = localStorage.getItem("CODE_COACH_TTS_MODE") || "off"; // "off" | "browser" | "gemini"
+let captionsEnabled = localStorage.getItem("CODE_COACH_CAPTIONS") !== "false";
+let ttsVoice = null;
+let activeSpeechToken = 0;
+
+let sttRecognition = null;
+let isListening = false;
+
+// Tree-sitter state
+let tsParser = null;
+let tsLanguage = null;
+let tsReady = false;
+
+// Monaco decoration state
+let activeDecorations = [];
+
+// =========================================================================
+// Tool Declarations (Gemini function calling)
+// =========================================================================
+const TOOL_DECLARATIONS = [
+  {
+    name: "edit_code",
+    description: "Replace a range of lines in the editor with new text. Use to fix bugs, insert code, or delete lines. Line numbers are 1-indexed. To insert without replacing, set startLine and endLine to the same line. To delete lines, set newText to empty string.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        startLine: { type: Type.NUMBER, description: "First line of range to replace (1-indexed)" },
+        endLine: { type: Type.NUMBER, description: "Last line of range to replace (1-indexed, inclusive)" },
+        newText: { type: Type.STRING, description: "Replacement text (can be multiple lines, or empty to delete)" }
+      },
+      required: ["startLine", "endLine", "newText"]
+    }
+  },
+  {
+    name: "highlight_lines",
+    description: "Highlight a span of lines in the editor and attach a rich annotation comment visible inline. Use to call attention to a specific section: a bug, a pattern worth noting, or a place that needs work. The annotation supports HTML including links. Only one highlight can be active at a time (previous is cleared).",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        startLine: { type: Type.NUMBER, description: "First line to highlight (1-indexed)" },
+        endLine: { type: Type.NUMBER, description: "Last line to highlight (1-indexed, inclusive)" },
+        message: { type: Type.STRING, description: "Short annotation text (plain text, 1-2 sentences)" },
+        linkUrl: { type: Type.STRING, description: "Optional documentation URL to include in the annotation" },
+        linkLabel: { type: Type.STRING, description: "Label for the link (defaults to 'docs')" }
+      },
+      required: ["startLine", "endLine", "message"]
+    }
+  },
+  {
+    name: "clear_highlights",
+    description: "Remove all active highlights and annotations from the editor.",
+    parameters: { type: Type.OBJECT, properties: {} }
+  },
+  {
+    name: "get_code",
+    description: "Get the current full source code from the editor. Use when you need to read the code outside of an automatic update.",
+    parameters: { type: Type.OBJECT, properties: {} }
+  },
+  {
+    name: "suggest_fix",
+    description: "Propose a small quick-fix inline in the editor. Shows a widget with Apply and Dismiss buttons on the affected line. Use for typos, misspellings, casing fixes, small one-line corrections. The student clicks Apply to accept (no chat needed) or Dismiss to reject. You will be notified of the outcome. Do NOT use for large refactors.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        line: { type: Type.NUMBER, description: "The line number to attach the fix to (1-indexed)" },
+        oldText: { type: Type.STRING, description: "The exact text to find and replace on that line" },
+        newText: { type: Type.STRING, description: "The replacement text" },
+        message: { type: Type.STRING, description: "Short description of the fix (e.g. 'typo: plyrHelth -> playerHealth')" }
+      },
+      required: ["line", "oldText", "newText", "message"]
+    }
+  },
+  {
+    name: "add_todo",
+    description: "Add a task to the student's todo list. Use to suggest next steps, track what needs doing, or break down a larger goal. The coach maintains this list automatically as the student codes.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        text: { type: Type.STRING, description: "Short task description (e.g. 'Add player sprite in create')" }
+      },
+      required: ["text"]
+    }
+  },
+  {
+    name: "complete_todo",
+    description: "Mark a todo item as done. Use when you observe the student has completed something on the list. Pass the exact text or a unique substring of the task to match it.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        text: { type: Type.STRING, description: "The task text (or substring) to mark complete" }
+      },
+      required: ["text"]
+    }
+  },
+  {
+    name: "remove_todo",
+    description: "Remove a todo item entirely. Use when a task is no longer relevant.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        text: { type: Type.STRING, description: "The task text (or substring) to remove" }
+      },
+      required: ["text"]
+    }
+  },
+  {
+    name: "run_preview",
+    description: "Run the student's code in the game preview iframe. Loads the current editor code with the Phaser 4 CDN and executes it. Returns any console output (logs, warnings, errors) from the run. Use when: the student asks to run, you want to test if their code works, or you notice they have not run in a while after significant changes.",
+    parameters: { type: Type.OBJECT, properties: {} }
+  },
+  {
+    name: "screenshot_preview",
+    description: "Capture a screenshot of the game preview canvas. You will receive the image as a follow-up so you can see what the game looks like. Use to check visual output, verify sprites are rendering, or when the student asks 'how does it look'. The game must be running first.",
+    parameters: { type: Type.OBJECT, properties: {} }
+  }
+];
+
+// =========================================================================
+// Tool Implementations
+// =========================================================================
+function toolEditCode({ startLine, endLine, newText }) {
+  if (!editor) return { error: "Editor not ready" };
+  const model = editor.getModel();
+  const totalLines = model.getLineCount();
+  startLine = Math.max(1, Math.min(startLine, totalLines));
+  endLine = Math.max(startLine, Math.min(endLine, totalLines));
+
+  const range = new monaco.Range(
+    startLine, 1,
+    endLine, model.getLineMaxColumn(endLine)
+  );
+
+  editor.executeEdits("code-coach", [{
+    range,
+    text: newText,
+    forceMoveMarkers: true
+  }]);
+
+  // Reset polling state so the edit is picked up cleanly
+  lastCode = editor.getValue();
+  stableCount = 0;
+
+  return {
+    success: true,
+    linesAffected: `${startLine}-${endLine}`,
+    newLineCount: model.getLineCount()
+  };
+}
+
+let annotationStyleEl = null;
+let activeAnnotation = null; // { startLine, endLine, message } for the current highlight
+
+function dismissAnnotation() {
+  if (!activeAnnotation) return;
+  const dismissed = activeAnnotation;
+  toolClearHighlights();
+  activeAnnotation = null;
+  // Notify coach asynchronously (don't block the UI)
+  sendToCoach(
+    `[The student dismissed your annotation on lines ${dismissed.startLine}-${dismissed.endLine}: "${dismissed.message}"]`
+  );
+}
+
+function toolHighlightLines({ startLine, endLine, message, linkUrl, linkLabel }) {
+  if (!editor) return { error: "Editor not ready" };
+
+  // Clear previous
+  toolClearHighlights();
+
+  const model = editor.getModel();
+  const totalLines = model.getLineCount();
+  startLine = Math.max(1, Math.min(startLine, totalLines));
+  endLine = Math.max(startLine, Math.min(endLine, totalLines));
+
+  // Build hover message with rich markdown (supports links)
+  let hoverMessage = message;
+  if (linkUrl) {
+    hoverMessage += `\n\n[${linkLabel || "docs"}](${linkUrl})`;
+  }
+
+  // Build the trailing annotation text for CSS ::after
+  let afterText = `  \u25B8 ${message}`;
+  if (linkUrl) {
+    afterText += ` (${linkLabel || "docs"})`;
+  }
+  // Escape for CSS content property
+  const cssContent = afterText.replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\n/g, " ");
+
+  // Inject a dynamic CSS rule for the ::after pseudo-element
+  if (annotationStyleEl) annotationStyleEl.remove();
+  annotationStyleEl = document.createElement("style");
+  annotationStyleEl.textContent = `
+    .coach-inline-annotation::after {
+      content: '${cssContent}';
+      color: #569cd6aa;
+      font-style: italic;
+      margin-left: 1.5em;
+      font-size: 0.85em;
+      pointer-events: none;
+    }
+  `;
+  document.head.appendChild(annotationStyleEl);
+
+  // Decorations: highlight background + gutter dot + hover + trailing annotation
+  activeDecorations = editor.deltaDecorations([], [
+    {
+      range: new monaco.Range(startLine, 1, endLine, 1),
+      options: {
+        isWholeLine: true,
+        className: "coach-highlight-line",
+        glyphMarginClassName: "coach-glyph",
+        hoverMessage: { value: hoverMessage, isTrusted: true },
+      }
+    },
+    {
+      range: new monaco.Range(startLine, 1, startLine, model.getLineMaxColumn(startLine)),
+      options: {
+        afterContentClassName: "coach-inline-annotation",
+      }
+    }
+  ]);
+
+  // Track what's active so dismissal can describe it to the coach
+  activeAnnotation = { startLine, endLine, message };
+
+  // Gently reveal without stealing focus
+  editor.revealLineInCenterIfOutsideViewport(startLine);
+
+  // Spawn particles at the annotation location
+  requestAnimationFrame(() => {
+    const pos = getEditorLineScreenPos(startLine);
+    if (pos) spawnParticles(pos.x, pos.y);
+  });
+
+  return { success: true, highlighted: `lines ${startLine}-${endLine}` };
+}
+
+function toolClearHighlights() {
+  if (!editor) return { error: "Editor not ready" };
+  if (activeDecorations.length) {
+    activeDecorations = editor.deltaDecorations(activeDecorations, []);
+  }
+  if (annotationStyleEl) {
+    annotationStyleEl.remove();
+    annotationStyleEl = null;
+  }
+  activeAnnotation = null;
+  return { success: true };
+}
+
+function toolGetCode() {
+  if (!editor) return { error: "Editor not ready" };
+  const code = editor.getValue();
+  const numbered = code.split("\n").map((line, i) => `${i + 1}: ${line}`).join("\n");
+  return { code: numbered, lineCount: editor.getModel().getLineCount(), note: "Line numbers are 1-indexed." };
+}
+
+// =========================================================================
+// Quick-fix system
+// =========================================================================
+let activeQuickFix = null; // { widget, line, oldText, newText, message, decorations }
+
+function toolSuggestFix({ line, oldText, newText, message }) {
+  if (!editor) return { error: "Editor not ready" };
+
+  // Clear any previous quick-fix
+  clearQuickFix();
+
+  const model = editor.getModel();
+  const totalLines = model.getLineCount();
+  line = Math.max(1, Math.min(line, totalLines));
+
+  // Verify the old text exists on that line
+  const lineContent = model.getLineContent(line);
+  if (!lineContent.includes(oldText)) {
+    return { error: `"${oldText}" not found on line ${line}` };
+  }
+
+  // Highlight the line subtly
+  const decorations = editor.deltaDecorations([], [{
+    range: new monaco.Range(line, 1, line, 1),
+    options: {
+      isWholeLine: true,
+      className: "coach-highlight-line",
+    }
+  }]);
+
+  // Create content widget with Apply/Dismiss buttons
+  const widgetId = `coach-quickfix-${Date.now()}`;
+  const widget = {
+    getId: () => widgetId,
+    getDomNode: () => {
+      const node = document.createElement("div");
+      node.className = "coach-quickfix";
+      node.innerHTML = `
+        <span class="qf-msg">${escapeHtml(message)}</span>
+        <button class="qf-apply">Apply</button>
+        <button class="qf-dismiss">Dismiss</button>
+      `;
+      node.querySelector(".qf-apply").addEventListener("click", () => applyQuickFix());
+      node.querySelector(".qf-dismiss").addEventListener("click", () => dismissQuickFix());
+      return node;
+    },
+    getPosition: () => ({
+      position: { lineNumber: line, column: model.getLineMaxColumn(line) },
+      preference: [monaco.editor.ContentWidgetPositionPreference.EXACT]
+    })
+  };
+
+  editor.addContentWidget(widget);
+  editor.revealLineInCenterIfOutsideViewport(line);
+
+  activeQuickFix = { widget, line, oldText, newText, message, decorations };
+
+  return { success: true, line, message: `Quick-fix offered on line ${line}. Waiting for student.` };
+}
+
+function applyQuickFix() {
+  if (!activeQuickFix) return;
+  const { line, oldText, newText, message } = activeQuickFix;
+
+  const model = editor.getModel();
+  const lineContent = model.getLineContent(line);
+  const col = lineContent.indexOf(oldText);
+  if (col === -1) {
+    clearQuickFix();
+    sendToCoach(`[Quick-fix "${message}" could not be applied: text no longer found on line ${line}]`);
+    return;
+  }
+
+  // Apply the fix
+  const range = new monaco.Range(line, col + 1, line, col + 1 + oldText.length);
+  editor.executeEdits("code-coach-quickfix", [{
+    range,
+    text: newText,
+    forceMoveMarkers: true
+  }]);
+
+  // Reset polling state
+  lastCode = editor.getValue();
+  stableCount = 0;
+
+  clearQuickFix();
+  sendToCoach(`[Student applied quick-fix on line ${line}: "${message}"]`);
+}
+
+function dismissQuickFix() {
+  if (!activeQuickFix) return;
+  const { line, message } = activeQuickFix;
+  clearQuickFix();
+  sendToCoach(`[Student dismissed quick-fix on line ${line}: "${message}"]`);
+}
+
+function clearQuickFix() {
+  if (!activeQuickFix) return;
+  editor.removeContentWidget(activeQuickFix.widget);
+  if (activeQuickFix.decorations.length) {
+    editor.deltaDecorations(activeQuickFix.decorations, []);
+  }
+  activeQuickFix = null;
+}
+
+// =========================================================================
+// WebAudio feedback sounds
+// =========================================================================
+let sfxEnabled = localStorage.getItem("CODE_COACH_SFX") !== "false";
+const sfxBtn = document.getElementById("sfx-btn");
+function updateSfxBtn() {
+  sfxBtn.textContent = `SFX: ${sfxEnabled ? "On" : "Off"}`;
+  sfxBtn.classList.toggle("active", sfxEnabled);
+}
+sfxBtn.addEventListener("click", () => {
+  sfxEnabled = !sfxEnabled;
+  localStorage.setItem("CODE_COACH_SFX", sfxEnabled);
+  updateSfxBtn();
+});
+updateSfxBtn();
+
+let audioCtx = null;
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playAddSound() {
+  if (!sfxEnabled) return;
+  const ctx = getAudioCtx();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(880, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(1100, ctx.currentTime + 0.08);
+  gain.gain.setValueAtTime(0.12, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.15);
+}
+
+function playCompleteSound() {
+  if (!sfxEnabled) return;
+  const ctx = getAudioCtx();
+  // Two-note ascending chime
+  [0, 0.1].forEach((offset, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(i === 0 ? 660 : 990, ctx.currentTime + offset);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime + offset);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.25);
+    osc.start(ctx.currentTime + offset);
+    osc.stop(ctx.currentTime + offset + 0.25);
+  });
+}
+
+// =========================================================================
+// Particle effect system
+// =========================================================================
+const particleCanvas = document.getElementById("particle-canvas");
+const pCtx = particleCanvas.getContext("2d");
+let particles = [];
+let particleAnimId = null;
+
+function resizeParticleCanvas() {
+  particleCanvas.width = window.innerWidth;
+  particleCanvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resizeParticleCanvas);
+resizeParticleCanvas();
+
+function spawnParticles(x, y, count = 12) {
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
+    const speed = 40 + Math.random() * 60;
+    const size = 2 + Math.random() * 3;
+    const hue = 210 + Math.random() * 30; // blue range
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 20,
+      size,
+      life: 1.0,
+      decay: 0.02 + Math.random() * 0.02,
+      color: `hsla(${hue}, 70%, 65%,`,
+    });
+  }
+  if (!particleAnimId) tickParticles();
+}
+
+function tickParticles() {
+  pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * 0.016;
+    p.y += p.vy * 0.016;
+    p.vy += 80 * 0.016; // gravity
+    p.life -= p.decay;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    pCtx.beginPath();
+    pCtx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    pCtx.fillStyle = p.color + p.life + ")";
+    pCtx.fill();
+  }
+  if (particles.length > 0) {
+    particleAnimId = requestAnimationFrame(tickParticles);
+  } else {
+    particleAnimId = null;
+  }
+}
+
+// Get screen coordinates for a line in the Monaco editor
+function getEditorLineScreenPos(lineNumber) {
+  if (!editor) return null;
+  const topPos = editor.getScrolledVisiblePosition({ lineNumber, column: 1 });
+  if (!topPos) return null;
+  const editorDom = editor.getDomNode();
+  if (!editorDom) return null;
+  const rect = editorDom.getBoundingClientRect();
+  return {
+    x: rect.left + topPos.left + 40,
+    y: rect.top + topPos.top + 10,
+  };
+}
+
+// =========================================================================
+// Todo list system
+// =========================================================================
+const todos = []; // { text: string, done: boolean }
+const todoItemsEl = document.getElementById("todo-items");
+const todoCountEl = document.getElementById("todo-count");
+
+function renderTodos() {
+  todoItemsEl.innerHTML = "";
+  let pending = 0;
+  todos.forEach((t, i) => {
+    if (!t.done) pending++;
+    const div = document.createElement("div");
+    div.className = `todo-item${t.done ? " done" : ""}`;
+    div.innerHTML = `<span class="todo-check">${t.done ? "✓" : ""}</span><span class="todo-text">${escapeHtml(t.text)}</span>`;
+    todoItemsEl.appendChild(div);
+  });
+  todoCountEl.textContent = pending > 0 ? pending : todos.length > 0 ? "✓" : "0";
+}
+
+function todoSummary() {
+  if (todos.length === 0) return "No tasks.";
+  return todos.map((t, i) => `${t.done ? "[x]" : "[ ]"} ${t.text}`).join("\n");
+}
+
+function toolAddTodo({ text }) {
+  todos.push({ text, done: false });
+  renderTodos();
+  playAddSound();
+  return { success: true, todos: todoSummary() };
+}
+
+function toolCompleteTodo({ text }) {
+  const lower = text.toLowerCase();
+  const item = todos.find(t => !t.done && t.text.toLowerCase().includes(lower));
+  if (!item) return { error: `No pending todo matching "${text}"` };
+  item.done = true;
+  renderTodos();
+  playCompleteSound();
+  return { success: true, completed: item.text, todos: todoSummary() };
+}
+
+function toolRemoveTodo({ text }) {
+  const lower = text.toLowerCase();
+  const idx = todos.findIndex(t => t.text.toLowerCase().includes(lower));
+  if (idx === -1) return { error: `No todo matching "${text}"` };
+  const removed = todos.splice(idx, 1)[0];
+  renderTodos();
+  return { success: true, removed: removed.text, todos: todoSummary() };
+}
+
+// =========================================================================
+// Game preview / run system
+// =========================================================================
+const gameIframe = document.getElementById("game-iframe");
+const consoleArea = document.getElementById("console-area");
+let consoleLines = []; // { level: "log"|"warn"|"error", text: string }
+
+function addConsoleLine(level, text) {
+  consoleLines.push({ level, text });
+  // Keep last 50 lines
+  if (consoleLines.length > 50) consoleLines.shift();
+  const div = document.createElement("div");
+  div.className = `console-line ${level}`;
+  div.textContent = `[${level}] ${text}`;
+  consoleArea.appendChild(div);
+  consoleArea.scrollTop = consoleArea.scrollHeight;
+}
+
+function clearConsole() {
+  consoleLines = [];
+  consoleArea.innerHTML = "";
+}
+
+function getConsoleSnapshot() {
+  if (consoleLines.length === 0) return "No console output.";
+  return consoleLines.map(l => `[${l.level}] ${l.text}`).join("\n");
+}
+
+// Listen for console messages from the iframe via postMessage
+window.addEventListener("message", (event) => {
+  if (event.data?.type === "console") {
+    addConsoleLine(event.data.level, event.data.text);
+  }
+});
+
+function runPreview() {
+  if (!editor) return { error: "Editor not ready" };
+  clearConsole();
+  addConsoleLine("log", "Running...");
+
+  const code = editor.getValue();
+
+  // Build a self-contained HTML document with Phaser 4 + the student's code.
+  // Console methods are patched to postMessage back to the parent.
+  const html = `<!DOCTYPE html>
+<html><head>
+<style>* { margin: 0; padding: 0; } body { background: #000; overflow: hidden; }</style>
+<script src="https://cdn.jsdelivr.net/npm/phaser@4.0.0/dist/phaser.min.js"><\/script>
+</head><body>
+<script>
+// Force preserveDrawingBuffer so screenshots via toDataURL work
+const _origGetContext = HTMLCanvasElement.prototype.getContext;
+HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+  if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
+    attrs = Object.assign({}, attrs, { preserveDrawingBuffer: true });
+  }
+  return _origGetContext.call(this, type, attrs);
+};
+// Patch console to relay messages to parent
+['log','warn','error'].forEach(level => {
+  const orig = console[level].bind(console);
+  console[level] = (...args) => {
+    orig(...args);
+    try {
+      parent.postMessage({ type: 'console', level, text: args.map(a => {
+        try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
+        catch { return String(a); }
+      }).join(' ') }, '*');
+    } catch {}
+  };
+});
+// Catch uncaught errors
+window.onerror = (msg, src, line, col, err) => {
+  parent.postMessage({ type: 'console', level: 'error',
+    text: msg + (line ? ' (line ' + line + ')' : '')
+  }, '*');
+};
+window.onunhandledrejection = (e) => {
+  parent.postMessage({ type: 'console', level: 'error',
+    text: 'Unhandled promise rejection: ' + (e.reason?.message || e.reason)
+  }, '*');
+};
+<\/script>
+<script>
+${code}
+<\/script>
+</body></html>`;
+
+  // Write to iframe via srcdoc
+  gameIframe.srcdoc = html;
+
+  return { success: true, message: "Preview running. Console output will appear." };
+}
+
+// =========================================================================
+// Screenshot capture
+// =========================================================================
+let lastScreenshotBase64 = null;
+
+// captureScreenshot returns a Promise because we need to use requestAnimationFrame
+// inside the iframe to ensure WebGL buffer hasn't been cleared.
+function captureScreenshot() {
+  return new Promise((resolve) => {
+    try {
+      const iframeWin = gameIframe.contentWindow;
+      const iframeDoc = iframeWin?.document;
+      if (!iframeDoc) { resolve({ error: "No preview running. Run the code first." }); return; }
+      const canvas = iframeDoc.querySelector("canvas");
+      if (!canvas) { resolve({ error: "No canvas found in preview. Is Phaser running?" }); return; }
+
+      // Capture inside a rAF so WebGL buffer is fresh (before present/clear)
+      iframeWin.requestAnimationFrame(() => {
+        try {
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+          lastScreenshotBase64 = dataUrl.split(",")[1];
+          // Check if we got a non-trivial image (blank canvas produces a tiny base64)
+          if (!lastScreenshotBase64 || lastScreenshotBase64.length < 500) {
+            // Fallback: try PNG, and if still tiny, the canvas is truly blank
+            const pngUrl = canvas.toDataURL("image/png");
+            lastScreenshotBase64 = pngUrl.split(",")[1];
+          }
+          resolve({ success: true, imageSize: lastScreenshotBase64.length });
+        } catch (err) {
+          resolve({ error: `Screenshot failed: ${err.message}` });
+        }
+      });
+    } catch (err) {
+      resolve({ error: `Screenshot failed: ${err.message}` });
+    }
+  });
+}
+
+async function sendScreenshotToCoach(userMessage) {
+  const result = await captureScreenshot();
+  if (result.error) {
+    addMessage("system", result.error);
+    return;
+  }
+  addMessage("user", userMessage || "[Sent screenshot]");
+  console.log("Sending screenshot to coach, base64 length:", lastScreenshotBase64.length);
+  await sendToCoach([
+    { inlineData: { mimeType: "image/jpeg", data: lastScreenshotBase64 } },
+    { text: userMessage || "[Screenshot of the game preview. Describe exactly what you see: colors, shapes, positions.]" }
+  ]);
+}
+
+async function toolScreenshotPreview() {
+  const result = await captureScreenshot();
+  if (result.error) return result;
+  // Send the image as a follow-up so the model actually sees it
+  setTimeout(async () => {
+    if (lastScreenshotBase64) {
+      await sendToCoach([
+        { inlineData: { mimeType: "image/jpeg", data: lastScreenshotBase64 } },
+        { text: "[Screenshot from your screenshot_preview tool. Describe exactly what you see: colors, shapes, positions.]" }
+      ]);
+    }
+  }, 100);
+  return { success: true, note: "Screenshot captured. You will receive the image momentarily." };
+}
+
+function toolRunPreview() {
+  const result = runPreview();
+  // Particles on the Run button when the coach triggers it
+  requestAnimationFrame(() => {
+    const btn = document.getElementById("run-btn");
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      spawnParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, 16);
+    }
+  });
+  return result;
+}
+
+const TOOL_HANDLERS = {
+  edit_code: toolEditCode,
+  highlight_lines: toolHighlightLines,
+  clear_highlights: toolClearHighlights,
+  get_code: toolGetCode,
+  suggest_fix: toolSuggestFix,
+  add_todo: toolAddTodo,
+  complete_todo: toolCompleteTodo,
+  remove_todo: toolRemoveTodo,
+  run_preview: toolRunPreview,
+  screenshot_preview: toolScreenshotPreview,
+};
+
+// Wire up run buttons and keyboard shortcut
+document.getElementById("run-btn").addEventListener("click", () => runPreview());
+document.getElementById("topbar-run-btn").addEventListener("click", () => runPreview());
+document.getElementById("clear-console-btn").addEventListener("click", clearConsole);
+document.getElementById("screenshot-btn").addEventListener("click", () => {
+  sendScreenshotToCoach("Here's what the game looks like right now. What do you think?");
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    e.preventDefault();
+    runPreview();
+  }
+});
+
+// =========================================================================
+// DOM refs
+// =========================================================================
+const chatLog = document.getElementById("chat-log");
+const userInput = document.getElementById("user-input");
+const sendBtn = document.getElementById("send-btn");
+const micBtn = document.getElementById("mic-btn");
+// ttsSelect is initialized in the TTS section below
+const captionsBtn = document.getElementById("captions-btn");
+const astStatus = document.getElementById("ast-status");
+const captionOverlay = document.getElementById("caption-overlay");
+
+// =========================================================================
+// Init Monaco
+// =========================================================================
+function initMonaco() {
+  return new Promise((resolve) => {
+    require.config({
+      paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs" }
+    });
+    require(["vs/editor/editor.main"], function () {
+      editor = monaco.editor.create(document.getElementById("monaco-container"), {
+        value: STARTER_CODE,
+        language: "javascript",
+        theme: "vs-dark",
+        fontSize: 14,
+        minimap: { enabled: false },
+        automaticLayout: true,
+        wordWrap: "on",
+        lineNumbers: "on",
+        scrollBeyondLastLine: false,
+        tabSize: 2,
+        glyphMargin: true,
+      });
+
+      // Update selection hint when selection changes
+      editor.onDidChangeCursorSelection(() => updateSelectionHint());
+
+      // Dismiss annotation on glyph margin click within the highlighted range
+      editor.onMouseDown((e) => {
+        if (
+          e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN &&
+          activeAnnotation
+        ) {
+          const clickedLine = e.target.position?.lineNumber;
+          if (
+            clickedLine &&
+            clickedLine >= activeAnnotation.startLine &&
+            clickedLine <= activeAnnotation.endLine
+          ) {
+            dismissAnnotation();
+          }
+        }
+      });
+
+      // Inject decoration styles into Monaco's container
+      const styleEl = document.createElement("style");
+      styleEl.textContent = `
+        .coach-highlight-line { background: rgba(86, 156, 214, 0.15) !important; }
+        .coach-glyph {
+          cursor: pointer !important;
+        }
+        .coach-glyph::before {
+          content: '\\2715';
+          color: #569cd688;
+          font-size: 12px;
+          line-height: 19px;
+          display: block;
+          text-align: center;
+        }
+        .coach-glyph:hover::before {
+          color: #f44747;
+        }
+      `;
+      document.head.appendChild(styleEl);
+
+      resolve();
+    });
+  });
+}
+
+// =========================================================================
+// Init Tree-sitter (WASM)
+// =========================================================================
+async function initTreeSitter() {
+  // TreeSitter is loaded as a global from the <script> tag above (UMD build,
+  // avoids the "fs" bundler error that esm.run/jsdelivr triggers).
+  const Parser = window.TreeSitter;
+  await Parser.init({
+    locateFile(scriptName) {
+      return `https://unpkg.com/web-tree-sitter@0.24.7/${scriptName}`;
+    },
+  });
+  tsParser = new Parser();
+
+  // Load JavaScript grammar WASM from the official npm package on unpkg
+  tsLanguage = await Parser.Language.load(
+    "https://unpkg.com/tree-sitter-javascript@0.23.1/tree-sitter-javascript.wasm"
+  );
+  tsParser.setLanguage(tsLanguage);
+  tsReady = true;
+  setASTStatus("stable", "Ready");
+}
+
+// =========================================================================
+// Init Gemini
+// =========================================================================
+async function initGemini() {
+  const apiKey = localStorage.getItem("GEMINI_API_KEY");
+  if (!apiKey) {
+    addMessage("system", "No GEMINI_API_KEY found in localStorage. Set it and reload.");
+    return;
+  }
+  ai = new GoogleGenAI({ apiKey });
+  chat = ai.chats.create({
+    model: CHAT_MODEL,
+    config: {
+      systemInstruction: SYSTEM_PROMPT,
+      temperature: 0.8,
+      maxOutputTokens: 1024,
+      thinkingConfig: { thinkingLevel: "MINIMAL" },
+      tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+    },
+  });
+  // Send first turn
+  await sendToCoach("The student has just opened the editor. Use get_code to see what they have, then say hi briefly.");
+}
+
+// =========================================================================
+// AST Polling Loop
+// =========================================================================
+function startPolling() {
+  setInterval(() => {
+    if (!tsReady || !editor) return;
+    const code = editor.getValue();
+    if (code === lastCode) {
+      // Code unchanged this tick
+      if (stableCount < STABILITY_THRESHOLD) {
+        stableCount++;
+      }
+      if (stableCount < STABILITY_THRESHOLD) {
+        setASTStatus("editing", `Settling... (${stableCount}/${STABILITY_THRESHOLD})`);
+      }
+      if (stableCount === STABILITY_THRESHOLD && !isCoachResponding) {
+        // Just became stable: check if AST changed since last coaching
+        const tree = tsParser.parse(code);
+        if (tree) {
+          const sexp = tree.rootNode.toString();
+          const hasErrors = tree.rootNode.hasError;
+          if (hasErrors) {
+            setASTStatus("error", "Syntax error");
+            maybeCoachOnChange(code, sexp, true);
+          } else if (sexp !== lastCoachedSexp) {
+            setASTStatus("stable", "Stable — sending to coach");
+            maybeCoachOnChange(code, sexp, false);
+          } else if (code !== lastCoachedCode) {
+            // AST structure unchanged but text differs (e.g. identifier rename)
+            setASTStatus("stable", "Stable — text change (rename?)");
+            maybeCoachOnChange(code, sexp, false);
+          } else {
+            setASTStatus("stable", "Stable — no new changes");
+          }
+          lastASTSexp = sexp;
+        }
+      }
+    } else {
+      // Code changed
+      lastCode = code;
+      stableCount = 0;
+      setASTStatus("editing", "Editing...");
+    }
+  }, POLL_INTERVAL_MS);
+}
+
+// =========================================================================
+// AST Diff (lightweight structural diff)
+// =========================================================================
+function computeASTDiff(oldSexp, newSexp) {
+  if (!oldSexp) return "Initial code snapshot (no previous state to diff against).";
+  if (oldSexp === newSexp) return "No structural changes.";
+
+  // Extract top-level forms from S-expressions for a rough structural diff.
+  // This is intentionally coarse: we want the coach to see what changed
+  // at the function/declaration level, not every token.
+  const extractTopLevel = (sexp) => {
+    const forms = [];
+    let depth = 0;
+    let start = -1;
+    for (let i = 0; i < sexp.length; i++) {
+      if (sexp[i] === "(") {
+        if (depth === 1) start = i;
+        depth++;
+      } else if (sexp[i] === ")") {
+        depth--;
+        if (depth === 1 && start >= 0) {
+          forms.push(sexp.slice(start, i + 1));
+          start = -1;
+        }
+      }
+    }
+    return forms;
+  };
+
+  const oldForms = new Set(extractTopLevel(oldSexp));
+  const newForms = new Set(extractTopLevel(newSexp));
+
+  const added = [...newForms].filter((f) => !oldForms.has(f));
+  const removed = [...oldForms].filter((f) => !newForms.has(f));
+
+  const parts = [];
+  if (added.length > 0) {
+    // Summarize added forms (truncate for readability)
+    parts.push(
+      `Added ${added.length} AST node(s): ${added.map((f) => f.slice(0, 120)).join("; ")}`
+    );
+  }
+  if (removed.length > 0) {
+    parts.push(
+      `Removed ${removed.length} AST node(s): ${removed.map((f) => f.slice(0, 120)).join("; ")}`
+    );
+  }
+  if (parts.length === 0) {
+    parts.push("Minor structural changes detected (internal modifications to existing nodes).");
+  }
+  return parts.join("\n");
+}
+
+// =========================================================================
+// Coach Trigger
+// =========================================================================
+async function maybeCoachOnChange(code, currentSexp, hasErrors) {
+  const now = Date.now();
+  if (now - lastCoachTime < DEBOUNCE_AFTER_COACH_MS) return;
+  if (isCoachResponding) return;
+
+  const diff = computeASTDiff(lastCoachedSexp, currentSexp);
+  const isTextOnlyChange = (diff === "No structural changes." && code !== lastCoachedCode);
+  // Skip if truly nothing changed
+  if (diff === "No structural changes." && !isTextOnlyChange && !hasErrors) return;
+
+  lastCoachedSexp = currentSexp;
+  lastCoachedCode = code;
+
+  // Include cursor position so the coach knows where the student is working
+  const cursorPos = editor.getPosition();
+  const cursorLine = cursorPos ? cursorPos.lineNumber : "unknown";
+  const cursorLineContent = cursorPos ? editor.getModel().getLineContent(cursorPos.lineNumber) : "";
+
+  let message = `[Code update]\n`;
+  message += `Cursor: line ${cursorLine} (content: ${cursorLineContent.trim()})\n`;
+  if (hasErrors) {
+    // Try to get error info from tree-sitter
+    const tree = tsParser.parse(code);
+    const errors = [];
+    const cursor = tree.walk();
+    const findErrors = (node) => {
+      if (node.type === "ERROR" || node.isMissing) {
+        errors.push(
+          `Line ${node.startPosition.row + 1}, col ${node.startPosition.column}: ${node.type}${node.isMissing ? " (missing)" : ""}`
+        );
+      }
+      for (let i = 0; i < node.childCount; i++) {
+        findErrors(node.child(i));
+      }
+    };
+    findErrors(tree.rootNode);
+    message += `Parse status: SYNTAX ERROR\nErrors: ${errors.join("; ") || "unknown location"}\n`;
+  } else {
+    message += `Parse status: OK\n`;
+  }
+  if (isTextOnlyChange) {
+    message += `AST diff: Structure unchanged, but identifiers or literals were renamed/edited. Check naming.\n`;
+  } else {
+    message += `AST diff: ${diff}\n`;
+  }
+  // Include line numbers so the model can reference them accurately (1-indexed)
+  const numberedCode = code.split("\n").map((line, i) => `${i + 1}: ${line}`).join("\n");
+  message += `\nCurrent code (with 1-indexed line numbers):\n\`\`\`\n${numberedCode}\n\`\`\``;
+
+  // Include todo state so the coach can auto-check completed items
+  if (todos.length > 0) {
+    message += `\n\nTodo list:\n${todoSummary()}`;
+  }
+
+  // Include recent console output so the coach sees runtime errors
+  const consoleSnap = getConsoleSnapshot();
+  if (consoleSnap !== "No console output.") {
+    message += `\n\nRecent console output:\n${consoleSnap}`;
+  }
+
+  addContextMessage(message, hasErrors);
+  await sendToCoach(message, true);
+}
+
+// =========================================================================
+// Gemini Chat
+// =========================================================================
+async function sendToCoach(message, isAutomatic = false) {
+  if (!chat) return;
+  isCoachResponding = true;
+  try {
+    let response = await chat.sendMessage({ message });
+
+    // Function-calling loop: Gemini 3 returns an `id` on each functionCall.
+    // We must include that `id` in the functionResponse so the model can
+    // map results back to the correct call.
+    let guard = 0;
+    while (response.functionCalls && response.functionCalls.length > 0 && guard++ < 10) {
+      const functionResponseParts = [];
+      for (const call of response.functionCalls) {
+        addToolCallMessage(call.name, call.args);
+        let result;
+        try {
+          const handler = TOOL_HANDLERS[call.name];
+          if (!handler) throw new Error(`Unknown tool: ${call.name}`);
+          result = handler(call.args);
+        } catch (err) {
+          result = { error: err.message };
+        }
+        // Build the functionResponse Part with the matching id
+        const part = {
+          functionResponse: {
+            name: call.name,
+            response: result,
+          }
+        };
+        if (call.id) part.functionResponse.id = call.id;
+        functionResponseParts.push(part);
+      }
+      response = await chat.sendMessage({ message: functionResponseParts });
+    }
+
+    // Final text response
+    const text = response.text?.trim();
+    if (text) {
+      addMessage("coach", text);
+      speakText(text);
+      lastCoachTime = Date.now();
+    }
+  } catch (err) {
+    console.error("Coach error:", err);
+    addMessage("system", `Coach error: ${err.message}`);
+  } finally {
+    isCoachResponding = false;
+  }
+}
+
+function addToolCallMessage(name, args) {
+  const div = document.createElement("div");
+  div.className = "msg toolcall";
+  const summary = Object.entries(args || {})
+    .filter(([k,v]) => k !== "newText")
+    .map(([k,v]) => `${k}=${JSON.stringify(v)}`)
+    .join(", ");
+  div.textContent = `tool: ${name}(${summary})`;
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+// =========================================================================
+// Chat UI
+// =========================================================================
+function addMessage(role, text) {
+  const div = document.createElement("div");
+  div.className = `msg ${role}`;
+  if (role === "coach") {
+    let rendered;
+    try {
+      rendered = marked.parse(text, { breaks: true, gfm: true });
+    } catch {
+      rendered = escapeHtml(text);
+    }
+    div.innerHTML = `<div class="label">Coach</div>${rendered}`;
+  } else if (role === "user") {
+    div.innerHTML = `<div class="label">You</div>${escapeHtml(text)}`;
+  } else {
+    div.textContent = text;
+  }
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function addContextMessage(rawMessage, hasErrors) {
+  // Extract just the diff and parse status (skip the full code for the summary line)
+  const lines = rawMessage.split("\n");
+  const parseLine = lines.find(l => l.startsWith("Parse status:")) || "";
+  const diffLine = lines.find(l => l.startsWith("AST diff:")) || "";
+  const badge = hasErrors
+    ? '<span class="ctx-badge err">ERROR</span>'
+    : '<span class="ctx-badge ok">OK</span>';
+  const summaryText = diffLine.replace("AST diff: ", "").slice(0, 80);
+
+  const div = document.createElement("div");
+  div.className = "msg context";
+  div.innerHTML = `<details>
+    <summary>${badge} ${escapeHtml(summaryText)}${summaryText.length >= 80 ? "..." : ""}</summary>
+    <pre>${escapeHtml(rawMessage)}</pre>
+  </details>`;
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function escapeHtml(str) {
+  const d = document.createElement("div");
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// Selection hint: show what lines are selected
+const selectionHint = document.getElementById("selection-hint");
+
+function updateSelectionHint() {
+  if (!editor) return;
+  const sel = editor.getSelection();
+  if (sel && !sel.isEmpty()) {
+    const startLine = sel.startLineNumber;
+    const endLine = sel.endLineNumber;
+    if (startLine === endLine) {
+      selectionHint.textContent = `L${startLine} selected`;
+    } else {
+      selectionHint.textContent = `L${startLine}-${endLine} selected`;
+    }
+  } else {
+    selectionHint.textContent = "";
+  }
+}
+
+// Get the selected code (if any) as context for the coach
+function getSelectionContext() {
+  if (!editor) return null;
+  const sel = editor.getSelection();
+  if (!sel || sel.isEmpty()) return null;
+  const model = editor.getModel();
+  const text = model.getValueInRange(sel);
+  return {
+    startLine: sel.startLineNumber,
+    endLine: sel.endLineNumber,
+    text,
+  };
+}
+
+// Handle user text input: include selection context if present
+async function handleUserSend() {
+  const text = userInput.value.trim();
+  if (!text) return;
+  userInput.value = "";
+
+  const selCtx = getSelectionContext();
+  let messageToCoach = "";
+  let displayText = text;
+
+  if (selCtx) {
+    // Number the selected lines with their actual 1-indexed line numbers
+    const numberedSel = selCtx.text.split("\n").map((line, i) => `${selCtx.startLine + i}: ${line}`).join("\n");
+    messageToCoach = `[Student selected lines ${selCtx.startLine}-${selCtx.endLine} (1-indexed)]\n`;
+    messageToCoach += `Selected code:\n\`\`\`\n${numberedSel}\n\`\`\`\n\n`;
+    messageToCoach += `Student says: ${text}`;
+    displayText = `[L${selCtx.startLine}-${selCtx.endLine}] ${text}`;
+  } else {
+    messageToCoach = `Student says: ${text}`;
+  }
+
+  addMessage("user", displayText);
+  await sendToCoach(messageToCoach);
+}
+
+sendBtn.addEventListener("click", handleUserSend);
+userInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    handleUserSend();
+  }
+});
+
+// =========================================================================
+// TTS (three modes: off, browser, gemini)
+// =========================================================================
+const ttsSelect = document.getElementById("tts-select");
+ttsSelect.value = ttsMode;
+
+ttsSelect.addEventListener("change", () => {
+  ttsMode = ttsSelect.value;
+  localStorage.setItem("CODE_COACH_TTS_MODE", ttsMode);
+  if (ttsMode !== "browser") speechSynthesis.cancel();
+});
+
+// Browser TTS voice selection
+function pickVoice() {
+  if (ttsVoice) return ttsVoice;
+  const voices = speechSynthesis.getVoices();
+  ttsVoice =
+    voices.find((v) => v.name.includes("Samantha")) ||
+    voices.find((v) => v.lang.startsWith("en") && v.name.includes("Natural")) ||
+    voices.find((v) => v.lang.startsWith("en-US")) ||
+    voices.find((v) => v.lang.startsWith("en")) ||
+    voices[0];
+  return ttsVoice;
+}
+speechSynthesis.addEventListener("voiceschanged", pickVoice);
+
+// Gemini TTS: call the TTS model, decode PCM, play via WebAudio
+async function geminiTTS(text, model) {
+  if (!ai) return;
+  // Show loading state on the caption
+  if (captionsEnabled) {
+    captionOverlay.textContent = "...";
+    captionOverlay.classList.add("visible");
+  }
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [{ parts: [{ text: `Say in a warm, concise coaching tone: ${text}` }] }],
+      config: {
+        responseModalities: ["AUDIO"],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: "Kore" },
+          },
+        },
+      },
+    });
+    const part = response.candidates?.[0]?.content?.parts?.[0];
+    const audioData = part?.inlineData?.data || part?.inline_data?.data;
+    if (!audioData) return;
+    // Decode base64 to raw bytes
+    const raw = Uint8Array.from(atob(audioData), c => c.charCodeAt(0));
+    // PCM 16-bit signed LE, 24kHz mono
+    const samples = new Float32Array(raw.length / 2);
+    for (let i = 0; i < samples.length; i++) {
+      const s = raw[i * 2] | (raw[i * 2 + 1] << 8);
+      samples[i] = (s > 32767 ? s - 65536 : s) / 32768;
+    }
+    const ctx = getAudioCtx();
+    const buffer = ctx.createBuffer(1, samples.length, 24000);
+    buffer.getChannelData(0).set(samples);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start();
+    // Update caption with actual text now that audio is playing
+    if (captionsEnabled) {
+      captionOverlay.textContent = text;
+      const readTime = Math.max(3000, text.length * 50);
+      setTimeout(() => captionOverlay.classList.remove("visible"), readTime);
+    }
+  } catch (err) {
+    console.warn("Gemini TTS error, falling back to browser:", err);
+    browserTTS(text);
+  }
+}
+
+// Browser TTS
+function browserTTS(text) {
+  const token = ++activeSpeechToken;
+  speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  const voice = pickVoice();
+  if (voice) utter.voice = voice;
+  utter.rate = 1.05;
+  utter.pitch = 1.0;
+  speechSynthesis.speak(utter);
+}
+
+// Main speak function: dispatches based on ttsMode
+function speakText(text) {
+  // Show caption regardless of TTS mode
+  if (captionsEnabled) {
+    captionOverlay.textContent = text;
+    captionOverlay.classList.add("visible");
+    const readTime = Math.max(3000, text.length * 50);
+    setTimeout(() => captionOverlay.classList.remove("visible"), readTime);
+  }
+
+  if (ttsMode === "browser") {
+    browserTTS(text);
+  } else if (ttsMode === "gemini") {
+    geminiTTS(text, "gemini-3.1-flash-tts-preview");
+  }
+  // "off" does nothing (captions still show)
+}
+
+// =========================================================================
+// Captions toggle
+// =========================================================================
+function updateCaptionsBtn() {
+  captionsBtn.textContent = `Captions: ${captionsEnabled ? "On" : "Off"}`;
+  captionsBtn.classList.toggle("active", captionsEnabled);
+}
+
+captionsBtn.addEventListener("click", () => {
+  captionsEnabled = !captionsEnabled;
+  localStorage.setItem("CODE_COACH_CAPTIONS", captionsEnabled);
+  updateCaptionsBtn();
+  if (!captionsEnabled) captionOverlay.classList.remove("visible");
+});
+
+// =========================================================================
+// STT (Web Speech Recognition)
+// =========================================================================
+function initSTT() {
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    micBtn.title = "Speech recognition not supported in this browser";
+    micBtn.disabled = true;
+    return;
+  }
+  sttRecognition = new SpeechRecognition();
+  sttRecognition.continuous = false;
+  sttRecognition.interimResults = false;
+  sttRecognition.lang = "en-US";
+
+  sttRecognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript;
+    userInput.value = transcript;
+    handleUserSend();
+  };
+
+  sttRecognition.onend = () => {
+    isListening = false;
+    micBtn.classList.remove("listening");
+  };
+
+  sttRecognition.onerror = (event) => {
+    console.warn("STT error:", event.error);
+    isListening = false;
+    micBtn.classList.remove("listening");
+  };
+
+  // Click to toggle
+  micBtn.addEventListener("click", toggleMic);
+
+  // Space to push-to-talk (only when not focused on editor or input)
+  document.addEventListener("keydown", (e) => {
+    if (e.code === "Space" && document.activeElement !== userInput &&
+        !document.activeElement?.closest("#monaco-container")) {
+      e.preventDefault();
+      if (!isListening) startMic();
+    }
+  });
+  document.addEventListener("keyup", (e) => {
+    if (e.code === "Space" && isListening &&
+        document.activeElement !== userInput) {
+      stopMic();
+    }
+  });
+}
+
+function toggleMic() {
+  if (isListening) stopMic();
+  else startMic();
+}
+
+function startMic() {
+  if (!sttRecognition || isListening) return;
+  // Pause TTS while listening
+  speechSynthesis.cancel();
+  isListening = true;
+  micBtn.classList.add("listening");
+  sttRecognition.start();
+}
+
+function stopMic() {
+  if (!sttRecognition || !isListening) return;
+  sttRecognition.stop();
+}
+
+// =========================================================================
+// AST Status indicator
+// =========================================================================
+function setASTStatus(cls, text) {
+  astStatus.className = cls;
+  astStatus.textContent = text;
+}
+
+// =========================================================================
+// Boot
+// =========================================================================
+async function boot() {
+  // TTS select is already initialized inline
+  updateCaptionsBtn();
+  initSTT();
+
+  addMessage("system", "Loading editor and language parser...");
+
+  // Init Monaco and tree-sitter in parallel
+  await Promise.all([initMonaco(), initTreeSitter()]);
+  lastCode = editor.getValue();
+
+  addMessage("system", "Editor ready. Connecting to coach...");
+
+  await initGemini();
+
+  // Start the AST polling loop
+  startPolling();
+
+  // Parse initial code to set baseline
+  const initialTree = tsParser.parse(lastCode);
+  if (initialTree) {
+    lastASTSexp = initialTree.rootNode.toString();
+    lastCoachedSexp = lastASTSexp;
+    lastCoachedCode = lastCode;
+  }
+}
+
+boot().catch((err) => {
+  console.error("Boot failed:", err);
+  addMessage("system", `Failed to initialize: ${err.message}`);
+});
+</script>
+</body>
+</html>
