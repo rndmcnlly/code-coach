@@ -23,7 +23,7 @@ The interface has a **four-panel layout**: code editor (dominant), game preview 
 
 ## Design Decisions
 
-**Single-file HTML with Web Components.** The application is a single `index.html` with 9 custom elements defined inline. Each component (editor, agent, AST watcher, game preview, todo list, chat, speech, particles, sound effects) is a `class ... extends HTMLElement` with its own state and methods. A boot orchestrator wires them together via `CustomEvent` dispatch on `document`. No build step, no bundler: serve it with any static HTTP server.
+**Modular ESM with Web Components.** The application is 10 ES modules loaded from a shell `index.html` (HTML + CSS only). Each component (editor, agent, AST watcher, game preview, todo list, chat, speech, effects) is a `class ... extends HTMLElement` with its own state and methods, defined in its own `.mjs` file. A `boot.mjs` orchestrator wires them together via `CustomEvent` dispatch on `document`. No build step, no bundler: serve it with any static HTTP server.
 
 **OpenAI-compatible LLM via BayLeaf API.** The `<coach-agent>` element makes direct `fetch` calls to `api.bayleaf.dev/v1/chat/completions`, an OpenAI-compatible proxy for UC Santa Cruz. On the campus network, no API key is needed. Off campus, a free BayLeaf key (`sk-bayleaf-...`) is required. The default model is `qwen/qwen3.5-35b-a3b` (vision-capable). The agent manages its own message history and tool-calling loop using the standard OpenAI `tool_calls` / `tool` role protocol.
 
@@ -41,14 +41,24 @@ The interface has a **four-panel layout**: code editor (dominant), game preview 
 
 **15-word response cap.** Coach responses are spoken aloud while the student is actively coding. Long explanations break flow. The hard word cap forces the model into the laconic register of a pair programmer who is mostly just watching: "Adding cursor keys, yep." or "That should be in preload."
 
-**Manual game execution.** The student must consciously click Run (or Ctrl+Enter) to execute their code in the preview iframe. No auto-run: students need to learn about the request flow. The coach can trigger a run via `run_preview` but is instructed to ask first.
+**Manual game execution.** The student must consciously click Run (or Ctrl+Enter) to execute their code in the preview iframe. No auto-run: students need to learn about the request flow. When the student runs manually, the coach is notified and receives the console output after a short delay. The coach can also trigger a run via `run_preview` but is instructed to ask first.
 
 **Naming awareness.** The coach pays attention to identifier names, flagging inconsistent casing (mixing camelCase and snake_case), misspellings, and cryptic abbreviations. This is surfaced through annotations and quick-fixes.
 
 ## Architecture
 
 ```
-Browser (single-file, 9 custom elements)
+index.html (HTML shell + CSS)
+  └── boot.mjs (composition root, tool dispatch, event wiring)
+        ├── code-editor.mjs    Monaco + decorations + quick-fix
+        ├── ast-watcher.mjs    Tree-sitter polling, AST diff
+        ├── game-preview.mjs   Iframe sandbox, console relay
+        ├── todo-list.mjs      Task state + rendering
+        ├── coach-chat.mjs     Chat log, thinking indicator
+        ├── speech-io.mjs      Browser TTS + push-to-talk STT
+        ├── coach-agent.mjs    LLM client, tool-calling loop
+        ├── effects.mjs        WebAudio synth + canvas particles
+        └── system-prompt.mjs  LLM system prompt
 
 +--------------------+-----------+----------+
 |  <code-editor>     | <todo-    | <coach-  |
@@ -82,12 +92,7 @@ Browser (single-file, 9 custom elements)
           add_todo, complete_todo,
           remove_todo
 
-Other elements:
-  <speech-io>    Browser TTS + push-to-talk STT
-  <sfx-engine>   WebAudio synth sounds
-  <particle-fx>  Canvas overlay particles
-
-Boot orchestrator wires all components via
+boot.mjs wires all components via
 CustomEvents on document.
 ```
 
@@ -108,9 +113,9 @@ CustomEvents on document.
 
 ## Voice and Feedback
 
-Two voice modes via dropdown:
+Two voice modes via dropdown (voice always starts off each session):
 - **Off**: captions only (text overlay at bottom of screen)
-- **On**: browser Web Speech API (instant)
+- **On**: browser Web Speech API (toggling on is the user gesture that unlocks `speechSynthesis`)
 
 Sound effects (toggleable SFX button):
 - Todo item added: quick ascending sine blip
@@ -120,7 +125,9 @@ Visual feedback:
 - Particle burst (blue sparkles) when the coach places an annotation
 - Particle burst on the Run button when the coach triggers `run_preview`
 - AST status indicator in the topbar (Editing / Settling / Stable / Syntax error)
+- Coach thinking indicator: pulsing topbar pill + animated dots in chat log while waiting for LLM response
 - Selection hint in the input bar showing which lines are selected
+- All implicit agent messages (run, dismiss, quick-fix outcomes) visible in the log
 
 ## Game Preview
 
@@ -131,7 +138,7 @@ The bottom of the editor pane contains a sandboxed iframe that runs the student'
 - Console output appears below the iframe and is included in code updates to the coach
 - Screenshots bundle console output alongside the image for full runtime context
 - **Share logs** button sends console output to the coach on demand (for runtime errors from interactive play that occur after the last code edit)
-- No auto-run: the student clicks Run or presses Ctrl+Enter
+- No auto-run: the student clicks Run or presses Ctrl/Cmd+Enter
 
 ## Dependencies (all loaded from CDN)
 
@@ -186,7 +193,11 @@ localStorage.setItem("BAYLEAF_API_KEY", "sk-bayleaf-...")
 - [x] Phaser 4 docs URL pattern in system prompt (lowercase hash fragment quirk)
 - [x] Naming and style awareness (casing, spelling, clarity of identifiers)
 - [x] 1-indexed line numbers in all code sent to the model
-- [x] Web Components architecture (9 custom elements + boot orchestrator)
+- [x] Web Components architecture (10 ESM modules + boot orchestrator)
+- [x] Thinking indicator (topbar pill + chat dots) during LLM requests
+- [x] Truncation recovery for tool-call JSON parse errors
+- [x] Student-run notification: agent sees console output when student clicks Run
+- [x] All implicit agent messages logged for observability
 - [ ] Multiple annotation layers (currently one highlight at a time)
 - [ ] Persistent coach memory across page reloads
 - [ ] Configurable coach persona

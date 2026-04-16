@@ -20,8 +20,41 @@
 //   "quickfix-applied"              – detail: { line, message }
 //   "quickfix-dismissed"            – detail: { line, message }
 // =========================================================================
-import { escapeHtml } from "./utils.mjs";
-import { STARTER_CODE } from "./starter-code.mjs";
+function escapeHtml(str) {
+  const d = document.createElement("div");
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+const STARTER_CODE = `// Welcome to Code Coach!
+// Start building your Phaser 4 game here.
+// The coach will react as you code.
+
+const config = {
+  type: Phaser.AUTO,
+  width: 800,
+  height: 600,
+  scene: {
+    preload: preload,
+    create: create,
+    update: update
+  }
+};
+
+const game = new Phaser.Game(config);
+
+function preload() {
+  // Load your assets here
+}
+
+function create() {
+  // Set up your game objects here
+}
+
+function update() {
+  // Game loop logic here
+}
+`;
 
 class CodeEditor extends HTMLElement {
   #editor = null;

@@ -13,8 +13,7 @@ import "./todo-list.mjs";
 import "./coach-chat.mjs";
 import "./speech-io.mjs";
 import "./coach-agent.mjs";
-import "./sfx-engine.mjs";
-import "./particle-fx.mjs";
+import "./effects.mjs";
 
 import { SYSTEM_PROMPT } from "./system-prompt.mjs";
 
@@ -175,6 +174,16 @@ async function boot() {
     await sendToAgent(fullMessage);
   });
 
+  // Student manually ran the preview (Run button or Ctrl+Enter)
+  document.addEventListener("student-run", () => {
+    chat.addMessage("system", "You ran the preview.");
+    // Wait for the iframe to produce console output, then notify the agent
+    setTimeout(async () => {
+      const consoleSnap = preview.getConsoleSnapshot();
+      await sendToAgent(`[Student ran the preview manually]\n\nConsole output:\n${consoleSnap}`);
+    }, 1500);
+  });
+
   // User text input
   document.addEventListener("user-send", async (e) => {
     await sendToAgent(e.detail.message);
@@ -212,6 +221,7 @@ async function boot() {
   // Annotation dismissed
   document.addEventListener("annotation-dismissed", async (e) => {
     const d = e.detail;
+    chat.addMessage("system", `Dismissed annotation on L${d.startLine}\u2013${d.endLine}.`);
     await sendToAgent(`[The student dismissed your annotation on lines ${d.startLine}-${d.endLine}: "${d.message}"]`);
   });
 
@@ -219,13 +229,16 @@ async function boot() {
   document.addEventListener("quickfix-applied", async (e) => {
     const d = e.detail;
     if (d.error) {
+      chat.addMessage("system", `Quick-fix failed: ${d.error}`);
       await sendToAgent(`[Quick-fix "${d.message}" could not be applied: ${d.error}]`);
     } else {
+      chat.addMessage("system", `Applied quick-fix on L${d.line}: ${d.message}`);
       watcher.resetTracking();
       await sendToAgent(`[Student applied quick-fix on line ${d.line}: "${d.message}"]`);
     }
   });
   document.addEventListener("quickfix-dismissed", async (e) => {
+    chat.addMessage("system", `Dismissed quick-fix on L${e.detail.line}.`);
     await sendToAgent(`[Student dismissed quick-fix on line ${e.detail.line}: "${e.detail.message}"]`);
   });
 

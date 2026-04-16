@@ -7,7 +7,11 @@
 //   removeTodo(text)       – returns {success, removed, todos} or {error}
 //   summary()              – string summary for LLM context
 // =========================================================================
-import { escapeHtml } from "./utils.mjs";
+function escapeHtml(str) {
+  const d = document.createElement("div");
+  d.textContent = str;
+  return d.innerHTML;
+}
 
 class TodoList extends HTMLElement {
   #todos = [];

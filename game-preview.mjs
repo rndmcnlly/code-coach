@@ -26,7 +26,6 @@ class GamePreview extends HTMLElement {
 
     // Wire up buttons
     document.getElementById("run-btn").addEventListener("click", () => this.runFromEditor());
-    document.getElementById("topbar-run-btn").addEventListener("click", () => this.runFromEditor());
     document.getElementById("clear-console-btn").addEventListener("click", () => this.clearConsole());
     document.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); this.runFromEditor(); }
@@ -36,7 +35,10 @@ class GamePreview extends HTMLElement {
   /** Run using current editor code (needs editor reference set by orchestrator). */
   runFromEditor() {
     const editor = document.querySelector("code-editor");
-    if (editor) this.run(editor.getValue());
+    if (editor) {
+      this.run(editor.getValue());
+      document.dispatchEvent(new CustomEvent("student-run"));
+    }
   }
 
   run(code) {

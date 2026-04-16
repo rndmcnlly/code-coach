@@ -9,7 +9,13 @@
 //   "user-send"           – detail: { message, displayText }
 //   "user-screenshot"     – detail: { userMessage }
 // =========================================================================
-import { escapeHtml, marked } from "./utils.mjs";
+import { marked } from "https://esm.run/marked";
+
+function escapeHtml(str) {
+  const d = document.createElement("div");
+  d.textContent = str;
+  return d.innerHTML;
+}
 
 class CoachChat extends HTMLElement {
   #chatLog = null;
