@@ -16,7 +16,7 @@ import "./speech-io.mjs";
 // Plain modules (explicit construction)
 import { CoachAgent } from "./coach-agent.mjs";
 import { AstWatcher } from "./ast-watcher.mjs";
-import { SfxEngine, ParticleFx } from "./effects.mjs";
+import { SfxEngine, spawnParticles } from "./effects.mjs";
 import { SYSTEM_PROMPT } from "./system-prompt.mjs";
 
 async function boot() {
@@ -29,7 +29,6 @@ async function boot() {
 
   // ---- Plain modules ----
   const sfx = new SfxEngine();
-  const particles = new ParticleFx(document.getElementById("particle-canvas"));
 
   const hasKey = !!localStorage.getItem("BAYLEAF_API_KEY");
   const agent = new CoachAgent({
@@ -113,7 +112,7 @@ async function boot() {
         const btn = document.getElementById("run-btn");
         if (btn) {
           const rect = btn.getBoundingClientRect();
-          particles.spawn(rect.left + rect.width / 2, rect.top + rect.height / 2, 16);
+          spawnParticles(rect.left + rect.width / 2, rect.top + rect.height / 2, 16);
         }
       });
       return result;
@@ -267,7 +266,7 @@ async function boot() {
 
   // ---- Particles from editor annotations ----
   document.addEventListener("particles-spawn", (e) => {
-    particles.spawn(e.detail.x, e.detail.y, e.detail.count || 12);
+    spawnParticles(e.detail.x, e.detail.y, e.detail.count || 12);
   });
 
   // ---- Initialize agent and start ----

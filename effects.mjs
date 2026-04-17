@@ -1,17 +1,51 @@
 // =========================================================================
-// SfxEngine : WebAudio synth feedback sounds
+// Effects : Sound (jsfxr) and particles (canvas-confetti)
 //
-// Plain class. Constructed by boot, called directly.
+// Thin wrappers around CDN globals: window.sfxr, window.confetti.
+// Both scripts must be loaded before this module runs.
 //
-// Constructor: new SfxEngine()
-// Methods:
-//   play(sound)         – "add" | "complete"
-//   get audioContext     – raw AudioContext for other uses (e.g. TTS playback)
-//   get enabled / set enabled
+// Exports:
+//   SfxEngine  – play("add") / play("complete"), enabled toggle
+//   particles  – spawn(x, y, count?) using canvas-confetti
 // =========================================================================
 
+// ---- SFX via jsfxr ----
+
+// Deterministic sound definitions (sfxr parameter objects).
+// Generated from blipSelect/powerUp presets, validated to produce audio,
+// then frozen as JSON. sfxr.play() on a fixed object is deterministic.
+const SOUNDS = {
+  add: {
+    oldParams: true, wave_type: 1,
+    p_env_attack: 0, p_env_sustain: 0.08786237127836559,
+    p_env_punch: 0.38391008620163014, p_env_decay: 0.24247658277452136,
+    p_base_freq: 0.4127722393536667, p_freq_limit: 0,
+    p_freq_ramp: 0, p_freq_dramp: 0,
+    p_vib_strength: 0, p_vib_speed: 0,
+    p_arp_mod: 0.4358939612721729, p_arp_speed: 0.6266209140742006,
+    p_duty: 0, p_duty_ramp: 0,
+    p_repeat_speed: 0, p_pha_offset: 0, p_pha_ramp: 0,
+    p_lpf_freq: 1, p_lpf_ramp: 0, p_lpf_resonance: 0,
+    p_hpf_freq: 0, p_hpf_ramp: 0,
+    sound_vol: 0.25, sample_rate: 44100, sample_size: 8,
+  },
+  complete: {
+    oldParams: true, wave_type: 1,
+    p_env_attack: 0, p_env_sustain: 0.0681742970582556,
+    p_env_punch: 0.42243409924120046, p_env_decay: 0.44252358061411645,
+    p_base_freq: 0.8731305186150191, p_freq_limit: 0,
+    p_freq_ramp: 0, p_freq_dramp: 0,
+    p_vib_strength: 0, p_vib_speed: 0,
+    p_arp_mod: 0.25813930015844255, p_arp_speed: 0.6078401963589114,
+    p_duty: 0, p_duty_ramp: 0,
+    p_repeat_speed: 0, p_pha_offset: 0, p_pha_ramp: 0,
+    p_lpf_freq: 1, p_lpf_ramp: 0, p_lpf_resonance: 0,
+    p_hpf_freq: 0, p_hpf_ramp: 0,
+    sound_vol: 0.25, sample_rate: 44100, sample_size: 8,
+  },
+};
+
 export class SfxEngine {
-  #ctx = null;
   #enabled;
 
   constructor() {
@@ -24,116 +58,32 @@ export class SfxEngine {
     localStorage.setItem("CODE_COACH_SFX", v);
   }
 
-  get audioContext() { return this.#getCtx(); }
-
-  #getCtx() {
-    if (!this.#ctx) this.#ctx = new (window.AudioContext || window.webkitAudioContext)();
-    return this.#ctx;
-  }
-
   play(sound) {
     if (!this.#enabled) return;
-    if (sound === "add") this.#playAdd();
-    else if (sound === "complete") this.#playComplete();
-  }
-
-  #playAdd() {
-    const ctx = this.#getCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(1100, ctx.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.12, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.15);
-  }
-
-  #playComplete() {
-    const ctx = this.#getCtx();
-    [0, 0.1].forEach((offset, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(i === 0 ? 660 : 990, ctx.currentTime + offset);
-      gain.gain.setValueAtTime(0.15, ctx.currentTime + offset);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.25);
-      osc.start(ctx.currentTime + offset);
-      osc.stop(ctx.currentTime + offset + 0.25);
-    });
+    const def = SOUNDS[sound];
+    if (def) sfxr.play(def);
   }
 }
 
-// =========================================================================
-// ParticleFx : Canvas overlay particle system
-//
-// Plain class. Constructed with a canvas element reference.
-//
-// Constructor: new ParticleFx(canvasElement)
-// Methods:
-//   spawn(x, y, count?)
-// =========================================================================
+// ---- Particles via canvas-confetti ----
 
-export class ParticleFx {
-  #canvas;
-  #ctx;
-  #particles = [];
-  #animId = null;
-
-  /**
-   * @param {HTMLCanvasElement} canvas
-   */
-  constructor(canvas) {
-    this.#canvas = canvas;
-    this.#ctx = canvas.getContext("2d");
-    this.#resize();
-    window.addEventListener("resize", () => this.#resize());
-  }
-
-  #resize() {
-    this.#canvas.width = window.innerWidth;
-    this.#canvas.height = window.innerHeight;
-  }
-
-  spawn(x, y, count = 12) {
-    for (let i = 0; i < count; i++) {
-      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
-      const speed = 40 + Math.random() * 60;
-      const size = 2 + Math.random() * 3;
-      const hue = 210 + Math.random() * 30;
-      this.#particles.push({
-        x, y,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed - 20,
-        size, life: 1.0,
-        decay: 0.02 + Math.random() * 0.02,
-        color: `hsla(${hue}, 70%, 65%,`,
-      });
-    }
-    if (!this.#animId) this.#tick();
-  }
-
-  #tick() {
-    this.#ctx.clearRect(0, 0, this.#canvas.width, this.#canvas.height);
-    for (let i = this.#particles.length - 1; i >= 0; i--) {
-      const p = this.#particles[i];
-      p.x += p.vx * 0.016;
-      p.y += p.vy * 0.016;
-      p.vy += 80 * 0.016;
-      p.life -= p.decay;
-      if (p.life <= 0) { this.#particles.splice(i, 1); continue; }
-      this.#ctx.beginPath();
-      this.#ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
-      this.#ctx.fillStyle = p.color + p.life + ")";
-      this.#ctx.fill();
-    }
-    if (this.#particles.length > 0) {
-      this.#animId = requestAnimationFrame(() => this.#tick());
-    } else {
-      this.#animId = null;
-    }
-  }
+/**
+ * Spawn a small burst of confetti at pixel coordinates.
+ * canvas-confetti uses 0–1 normalized origin, so we convert.
+ */
+export function spawnParticles(x, y, count = 12) {
+  confetti({
+    particleCount: count,
+    startVelocity: 15,
+    spread: 360,
+    gravity: 0.6,
+    ticks: 60,
+    scalar: 0.6,
+    origin: {
+      x: x / window.innerWidth,
+      y: y / window.innerHeight,
+    },
+    colors: ["#569cd6", "#6a9955", "#ce9178"],
+    disableForReducedMotion: true,
+  });
 }

@@ -176,11 +176,7 @@
   }
   #caption-overlay.visible { display: block; }
 
-  /* Particle canvas overlay */
-  #particle-canvas {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    pointer-events: none; z-index: 9998;
-  }
+
 
   /* Quick-fix widget (inline in editor) */
   .coach-quickfix {
@@ -313,7 +309,6 @@
 </div>
 
 <div id="caption-overlay"></div>
-<canvas id="particle-canvas"></canvas>
 
 <!-- Custom elements (hidden, no visual output of their own) -->
 <code-editor></code-editor>
@@ -327,6 +322,11 @@
 
 <!-- Tree-sitter: load pre-built UMD from unpkg -->
 <script src="https://unpkg.com/web-tree-sitter@0.24.7/tree-sitter.js"></script>
+
+<!-- Sound effects (sfxr) and particles (canvas-confetti) -->
+<script src="https://sfxr.me/riffwave.js"></script>
+<script src="https://sfxr.me/sfxr.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
 
 <!-- Boot orchestrator loads all component modules and wires them together -->
 <script type="module" src="./boot.mjs"></script>
