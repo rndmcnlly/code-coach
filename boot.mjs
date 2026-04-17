@@ -1,58 +1,92 @@
 // =========================================================================
 // Boot Orchestrator
 //
-// Wires all custom elements together via events and direct method calls.
+// Wires all components together. Custom elements are queried from the DOM;
+// plain modules are imported and constructed here with explicit dependencies.
 // This is the only code that knows the full component topology.
 // =========================================================================
 
-// Import all component modules (side effects: each registers its custom element)
+// Custom elements (side-effect imports: each registers its element)
 import "./code-editor.mjs";
-import "./ast-watcher.mjs";
 import "./game-preview.mjs";
 import "./todo-list.mjs";
 import "./coach-chat.mjs";
 import "./speech-io.mjs";
-import "./coach-agent.mjs";
-import "./effects.mjs";
 
+// Plain modules (explicit construction)
+import { CoachAgent } from "./coach-agent.mjs";
+import { AstWatcher } from "./ast-watcher.mjs";
+import { SfxEngine, ParticleFx } from "./effects.mjs";
 import { SYSTEM_PROMPT } from "./system-prompt.mjs";
 
 async function boot() {
-  // Grab component references
-  const agent     = document.querySelector("coach-agent");
+  // ---- Custom elements (still DOM-resident) ----
   const editor    = document.querySelector("code-editor");
-  const watcher   = document.querySelector("ast-watcher");
   const preview   = document.querySelector("game-preview");
   const todoList  = document.querySelector("todo-list");
   const chat      = document.querySelector("coach-chat");
   const speech    = document.querySelector("speech-io");
 
+  // ---- Plain modules ----
+  const sfx = new SfxEngine();
+  const particles = new ParticleFx(document.getElementById("particle-canvas"));
+
+  const hasKey = !!localStorage.getItem("BAYLEAF_API_KEY");
+  const agent = new CoachAgent({
+    apiBase: "https://api.bayleaf.dev/v1",
+    model: "qwen/qwen3.5-35b-a3b",
+    apiKey: localStorage.getItem("BAYLEAF_API_KEY") || "",
+  });
+
+  const watcher = new AstWatcher({
+    pollMs: 1000,
+    stabilityThreshold: 2,
+    debounceMs: 4000,
+  });
+
+  // ---- Wire SFX button ----
+  const sfxBtn = document.getElementById("sfx-btn");
+  sfxBtn.textContent = `SFX: ${sfx.enabled ? "On" : "Off"}`;
+  sfxBtn.classList.toggle("active", sfx.enabled);
+  sfxBtn.addEventListener("click", () => {
+    sfx.enabled = !sfx.enabled;
+    sfxBtn.textContent = `SFX: ${sfx.enabled ? "On" : "Off"}`;
+    sfxBtn.classList.toggle("active", sfx.enabled);
+  });
+
+  // ---- Init ----
   chat.addMessage("system", "Loading editor and language parser...");
-
-  // Init Monaco and tree-sitter in parallel
   await Promise.all([editor.ready, watcher.init()]);
-
-  // Wire watcher to editor
   watcher.setEditor(editor);
 
-  // Show auth status
-  const hasKey = !!localStorage.getItem("BAYLEAF_API_KEY");
   if (hasKey) {
     chat.addMessage("system", "Editor ready. Connecting to coach (BayLeaf API key)...");
   } else {
     chat.addMessage("system", "Editor ready. Connecting to coach (campus network, no key)...");
-    chat.addMessage("system", "Off campus? Run in console: localStorage.setItem('BAYLEAF_API_KEY', 'sk-bayleaf-...')  — get a free key at api.bayleaf.dev");
+    chat.addMessage("system", "Off campus? Run in console: localStorage.setItem('BAYLEAF_API_KEY', 'sk-bayleaf-...')  \u2014 get a free key at api.bayleaf.dev");
   }
 
-  // AST status indicator
+  // ---- AST status indicator ----
   const astStatus = document.getElementById("ast-status");
-  document.addEventListener("ast-status", (e) => {
-    astStatus.className = e.detail.cls;
-    astStatus.textContent = e.detail.text;
-  });
+  watcher.onStatus = (cls, text) => {
+    astStatus.className = cls;
+    astStatus.textContent = text;
+  };
+
+  // ---- Thinking indicator ----
+  const coachStatus = document.getElementById("coach-status");
+  function showThinking() {
+    coachStatus.textContent = "Coach thinking\u2026";
+    coachStatus.className = "thinking";
+    chat.showThinking();
+  }
+  function hideThinking() {
+    coachStatus.textContent = "";
+    coachStatus.className = "";
+    chat.hideThinking();
+  }
 
   // ---- Tool dispatch ----
-  // Maps tool names to handler functions. Each returns a result object.
   const toolHandlers = {
     edit_code: (args) => {
       const result = editor.editCode(args);
@@ -63,8 +97,15 @@ async function boot() {
     clear_highlights: () => editor.clearHighlights(),
     get_code: () => editor.getCode(),
     suggest_fix: (args) => editor.suggestFix(args),
-    add_todo: (args) => todoList.addTodo(args),
-    complete_todo: (args) => todoList.completeTodo(args),
+    add_todo: (args) => {
+      sfx.play("add");
+      return todoList.addTodo(args);
+    },
+    complete_todo: (args) => {
+      const result = todoList.completeTodo(args);
+      if (result.success) sfx.play("complete");
+      return result;
+    },
     remove_todo: (args) => todoList.removeTodo(args),
     run_preview: () => {
       const result = preview.run(editor.getValue());
@@ -72,9 +113,7 @@ async function boot() {
         const btn = document.getElementById("run-btn");
         if (btn) {
           const rect = btn.getBoundingClientRect();
-          document.dispatchEvent(new CustomEvent("particles-spawn", {
-            detail: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, count: 16 }
-          }));
+          particles.spawn(rect.left + rect.width / 2, rect.top + rect.height / 2, 16);
         }
       });
       return result;
@@ -82,7 +121,6 @@ async function boot() {
     screenshot_preview: async () => {
       const result = await preview.captureScreenshot();
       if (result.error) return result;
-      // Send image + console as follow-up so the model sees both
       setTimeout(async () => {
         const base64 = preview.lastScreenshotBase64;
         if (base64) {
@@ -101,9 +139,7 @@ async function boot() {
     },
   };
 
-  // Handle tool calls from the agent
-  document.addEventListener("agent-tool-calls", async (e) => {
-    const { calls, resolve } = e.detail;
+  async function handleToolCalls(calls) {
     const results = [];
     for (const call of calls) {
       chat.addToolCallMessage(call.name, call.arguments);
@@ -120,47 +156,31 @@ async function boot() {
         content: typeof result === "string" ? result : JSON.stringify(result),
       });
     }
-    resolve(results);
-  });
-
-  // ---- Thinking indicator ----
-  const coachStatus = document.getElementById("coach-status");
-  function showThinking() {
-    coachStatus.textContent = "Coach thinking\u2026";
-    coachStatus.className = "thinking";
-    chat.showThinking();
+    return results;
   }
-  function hideThinking() {
-    coachStatus.textContent = "";
-    coachStatus.className = "";
-    chat.hideThinking();
-  }
-
-  // Handle agent text responses
-  document.addEventListener("agent-response", (e) => {
-    hideThinking();
-    chat.addMessage("coach", e.detail.text);
-    document.dispatchEvent(new CustomEvent("speak", { detail: { text: e.detail.text } }));
-  });
-
-  document.addEventListener("agent-error", (e) => {
-    hideThinking();
-    chat.addMessage("system", `Coach error: ${e.detail.error}`);
-  });
 
   // ---- Send helpers ----
   async function sendToAgent(content) {
     showThinking();
     watcher.setCoachResponding(true);
-    await agent.send(content);
-    // responding flag cleared by watcher listening to agent-response / agent-error
+    await agent.send(content, {
+      onToolCalls: handleToolCalls,
+      onResponse: (text) => {
+        hideThinking();
+        watcher.notifyResponseDone();
+        chat.addMessage("coach", text);
+        document.dispatchEvent(new CustomEvent("speak", { detail: { text } }));
+      },
+      onError: (error) => {
+        hideThinking();
+        watcher.notifyResponseError();
+        chat.addMessage("system", `Coach error: ${error}`);
+      },
+    });
   }
 
-  // Code context from AST watcher (automatic updates)
-  document.addEventListener("code-context", async (e) => {
-    const { message, hasErrors } = e.detail;
-
-    // Append todo state
+  // ---- Watcher -> Agent ----
+  watcher.onCodeContext = async (message, hasErrors) => {
     let fullMessage = message;
     if (todoList.todos.length > 0) {
       fullMessage += `\n\nTodo list:\n${todoList.summary()}`;
@@ -169,27 +189,25 @@ async function boot() {
     if (consoleSnap !== "No console output.") {
       fullMessage += `\n\nRecent console output:\n${consoleSnap}`;
     }
-
     chat.addContextMessage(fullMessage, hasErrors);
     await sendToAgent(fullMessage);
-  });
+  };
 
-  // Student manually ran the preview (Run button or Ctrl+Enter)
+  // ---- Student manually ran the preview ----
   document.addEventListener("student-run", () => {
     chat.addMessage("system", "You ran the preview.");
-    // Wait for the iframe to produce console output, then notify the agent
     setTimeout(async () => {
       const consoleSnap = preview.getConsoleSnapshot();
       await sendToAgent(`[Student ran the preview manually]\n\nConsole output:\n${consoleSnap}`);
     }, 1500);
   });
 
-  // User text input
+  // ---- User text input ----
   document.addEventListener("user-send", async (e) => {
     await sendToAgent(e.detail.message);
   });
 
-  // User screenshot button (bundles console output alongside the image)
+  // ---- User screenshot button ----
   document.addEventListener("user-screenshot", async (e) => {
     const result = await preview.captureScreenshot();
     if (result.error) { chat.addMessage("system", result.error); return; }
@@ -207,7 +225,7 @@ async function boot() {
     ]);
   });
 
-  // Share logs button: send console output to agent on demand
+  // ---- Share logs ----
   document.getElementById("share-logs-btn").addEventListener("click", async () => {
     const consoleSnap = preview.getConsoleSnapshot();
     if (consoleSnap === "No console output.") {
@@ -218,14 +236,14 @@ async function boot() {
     await sendToAgent(`[Student shared console logs]\n\n${consoleSnap}`);
   });
 
-  // Annotation dismissed
+  // ---- Annotation dismissed ----
   document.addEventListener("annotation-dismissed", async (e) => {
     const d = e.detail;
     chat.addMessage("system", `Dismissed annotation on L${d.startLine}\u2013${d.endLine}.`);
     await sendToAgent(`[The student dismissed your annotation on lines ${d.startLine}-${d.endLine}: "${d.message}"]`);
   });
 
-  // Quick-fix outcomes
+  // ---- Quick-fix outcomes ----
   document.addEventListener("quickfix-applied", async (e) => {
     const d = e.detail;
     if (d.error) {
@@ -242,15 +260,18 @@ async function boot() {
     await sendToAgent(`[Student dismissed quick-fix on line ${e.detail.line}: "${e.detail.message}"]`);
   });
 
-  // STT transcript -> chat input
+  // ---- STT transcript -> chat input ----
   document.addEventListener("transcript", (e) => {
     chat.sendText(e.detail.text);
   });
 
+  // ---- Particles from editor annotations ----
+  document.addEventListener("particles-spawn", (e) => {
+    particles.spawn(e.detail.x, e.detail.y, e.detail.count || 12);
+  });
+
   // ---- Initialize agent and start ----
   agent.setSystemPrompt(SYSTEM_PROMPT);
-
-  // Start polling and send first turn
   watcher.startPolling();
   await sendToAgent("The student has just opened the editor. Use get_code to see what they have, then say hi briefly.");
 }

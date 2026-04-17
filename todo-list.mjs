@@ -33,7 +33,6 @@ class TodoList extends HTMLElement {
   addTodo({ text }) {
     this.#todos.push({ text, done: false });
     this.#render();
-    document.dispatchEvent(new CustomEvent("sfx-play", { detail: { sound: "add" } }));
     return { success: true, todos: this.summary() };
   }
 
@@ -43,7 +42,6 @@ class TodoList extends HTMLElement {
     if (!item) return { error: `No pending todo matching "${text}"` };
     item.done = true;
     this.#render();
-    document.dispatchEvent(new CustomEvent("sfx-play", { detail: { sound: "complete" } }));
     return { success: true, completed: item.text, todos: this.summary() };
   }
 

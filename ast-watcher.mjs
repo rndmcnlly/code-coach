@@ -1,18 +1,22 @@
 // =========================================================================
-// <ast-watcher> : Tree-sitter parsing, polling, stability detection, diff
+// AstWatcher : Tree-sitter parsing, polling, stability detection, diff
 //
-// Attributes: poll-ms, stability-threshold, debounce-ms
-// Requires: a <code-editor> element (passed via setEditor())
+// Plain class (no DOM dependency). Constructed with config, wired by boot.
+//
+// Constructor: new AstWatcher({ pollMs, stabilityThreshold, debounceMs })
 // Methods:
-//   async init()                – load tree-sitter WASM
-//   setEditor(codeEditor)      – bind to a CodeEditor instance
+//   async init()                    – load tree-sitter WASM
+//   setEditor(editor)              – bind to anything with getValue/getPosition/getLineContent
 //   startPolling()
-//   getLastCoachedCode()       – for resetting after edits
-// Events dispatched on document:
-//   "ast-status"               – detail: { cls, text }
-//   "code-context"             – detail: { message, hasErrors } (ready to send to agent)
+//   resetTracking()
+//   setCoachResponding(bool)
+//   get lastCoachedCode
+// Callbacks (set by caller):
+//   onStatus(cls, text)
+//   onCodeContext(message, hasErrors)
 // =========================================================================
-class AstWatcher extends HTMLElement {
+
+export class AstWatcher {
   #parser = null;
   #language = null;
   #ready = false;
@@ -26,28 +30,40 @@ class AstWatcher extends HTMLElement {
   #lastCoachTime = 0;
   #coachResponding = false;
 
-  #pollMs = 1000;
-  #stabilityThreshold = 2;
-  #debounceMs = 4000;
+  #pollMs;
+  #stabilityThreshold;
+  #debounceMs;
 
-  connectedCallback() {
-    this.#pollMs = parseInt(this.getAttribute("poll-ms")) || 1000;
-    this.#stabilityThreshold = parseInt(this.getAttribute("stability-threshold")) || 2;
-    this.#debounceMs = parseInt(this.getAttribute("debounce-ms")) || 4000;
+  // Callbacks – set by the caller (boot.mjs)
+  onStatus = () => {};
+  onCodeContext = () => {};
 
-    // Listen for agent response to track timing
-    document.addEventListener("agent-response", () => {
-      this.#lastCoachTime = Date.now();
-      this.#coachResponding = false;
-    });
-    document.addEventListener("agent-error", () => {
-      this.#coachResponding = false;
-    });
+  /**
+   * @param {Object} config
+   * @param {number} [config.pollMs=1000]
+   * @param {number} [config.stabilityThreshold=2]
+   * @param {number} [config.debounceMs=4000]
+   */
+  constructor({ pollMs = 1000, stabilityThreshold = 2, debounceMs = 4000 } = {}) {
+    this.#pollMs = pollMs;
+    this.#stabilityThreshold = stabilityThreshold;
+    this.#debounceMs = debounceMs;
   }
 
   setEditor(editor) { this.#editor = editor; }
   setCoachResponding(v) { this.#coachResponding = v; }
   get lastCoachedCode() { return this.#lastCoachedCode; }
+
+  /** Notify that the agent finished responding (resets timing). */
+  notifyResponseDone() {
+    this.#lastCoachTime = Date.now();
+    this.#coachResponding = false;
+  }
+
+  /** Notify that the agent errored (clears responding flag). */
+  notifyResponseError() {
+    this.#coachResponding = false;
+  }
 
   /** Reset tracking state after an external edit (e.g. tool edit_code). */
   resetTracking() {
@@ -69,14 +85,13 @@ class AstWatcher extends HTMLElement {
     );
     this.#parser.setLanguage(this.#language);
     this.#ready = true;
-    this.#setStatus("stable", "Ready");
+    this.onStatus("stable", "Ready");
   }
 
   startPolling() {
     if (!this.#editor) return;
     this.#lastCode = this.#editor.getValue();
 
-    // Set baseline AST
     const tree = this.#parser.parse(this.#lastCode);
     if (tree) {
       this.#lastASTSexp = tree.rootNode.toString();
@@ -94,7 +109,7 @@ class AstWatcher extends HTMLElement {
     if (code === this.#lastCode) {
       if (this.#stableCount < this.#stabilityThreshold) this.#stableCount++;
       if (this.#stableCount < this.#stabilityThreshold) {
-        this.#setStatus("editing", `Settling... (${this.#stableCount}/${this.#stabilityThreshold})`);
+        this.onStatus("editing", `Settling... (${this.#stableCount}/${this.#stabilityThreshold})`);
       }
       if (this.#stableCount === this.#stabilityThreshold && !this.#coachResponding) {
         const tree = this.#parser.parse(code);
@@ -102,16 +117,16 @@ class AstWatcher extends HTMLElement {
           const sexp = tree.rootNode.toString();
           const hasErrors = tree.rootNode.hasError;
           if (hasErrors) {
-            this.#setStatus("error", "Syntax error");
+            this.onStatus("error", "Syntax error");
             this.#maybeCoach(code, sexp, true);
           } else if (sexp !== this.#lastCoachedSexp) {
-            this.#setStatus("stable", "Stable \u2014 sending to coach");
+            this.onStatus("stable", "Stable \u2014 sending to coach");
             this.#maybeCoach(code, sexp, false);
           } else if (code !== this.#lastCoachedCode) {
-            this.#setStatus("stable", "Stable \u2014 text change (rename?)");
+            this.onStatus("stable", "Stable \u2014 text change (rename?)");
             this.#maybeCoach(code, sexp, false);
           } else {
-            this.#setStatus("stable", "Stable \u2014 no new changes");
+            this.onStatus("stable", "Stable \u2014 no new changes");
           }
           this.#lastASTSexp = sexp;
         }
@@ -119,7 +134,7 @@ class AstWatcher extends HTMLElement {
     } else {
       this.#lastCode = code;
       this.#stableCount = 0;
-      this.#setStatus("editing", "Editing...");
+      this.onStatus("editing", "Editing...");
     }
   }
 
@@ -167,7 +182,7 @@ class AstWatcher extends HTMLElement {
     const numbered = code.split("\n").map((line, i) => `${i + 1}: ${line}`).join("\n");
     message += `\nCurrent code (with 1-indexed line numbers):\n\`\`\`\n${numbered}\n\`\`\``;
 
-    document.dispatchEvent(new CustomEvent("code-context", { detail: { message, hasErrors } }));
+    this.onCodeContext(message, hasErrors);
   }
 
   #computeDiff(oldSexp, newSexp) {
@@ -194,9 +209,4 @@ class AstWatcher extends HTMLElement {
     if (!parts.length) parts.push("Minor structural changes detected (internal modifications to existing nodes).");
     return parts.join("\n");
   }
-
-  #setStatus(cls, text) {
-    document.dispatchEvent(new CustomEvent("ast-status", { detail: { cls, text } }));
-  }
 }
-customElements.define("ast-watcher", AstWatcher);

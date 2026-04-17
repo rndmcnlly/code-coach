@@ -1,39 +1,37 @@
 // =========================================================================
-// <sfx-engine> : WebAudio synth feedback sounds
+// SfxEngine : WebAudio synth feedback sounds
 //
-// Listens: "sfx-play" on document (detail: { sound: "add"|"complete" })
-// Attribute: enabled (boolean, toggles via sfx-btn)
+// Plain class. Constructed by boot, called directly.
+//
+// Constructor: new SfxEngine()
+// Methods:
+//   play(sound)         – "add" | "complete"
+//   get audioContext     – raw AudioContext for other uses (e.g. TTS playback)
+//   get enabled / set enabled
 // =========================================================================
-class SfxEngine extends HTMLElement {
+
+export class SfxEngine {
   #ctx = null;
-  #enabled = true;
+  #enabled;
 
-  connectedCallback() {
+  constructor() {
     this.#enabled = localStorage.getItem("CODE_COACH_SFX") !== "false";
-    const btn = document.getElementById("sfx-btn");
-    this.#updateBtn(btn);
-    btn.addEventListener("click", () => {
-      this.#enabled = !this.#enabled;
-      localStorage.setItem("CODE_COACH_SFX", this.#enabled);
-      this.#updateBtn(btn);
-    });
-    document.addEventListener("sfx-play", (e) => this.#play(e.detail.sound));
   }
 
-  #updateBtn(btn) {
-    btn.textContent = `SFX: ${this.#enabled ? "On" : "Off"}`;
-    btn.classList.toggle("active", this.#enabled);
+  get enabled() { return this.#enabled; }
+  set enabled(v) {
+    this.#enabled = v;
+    localStorage.setItem("CODE_COACH_SFX", v);
   }
+
+  get audioContext() { return this.#getCtx(); }
 
   #getCtx() {
     if (!this.#ctx) this.#ctx = new (window.AudioContext || window.webkitAudioContext)();
     return this.#ctx;
   }
 
-  // Expose for components that need raw AudioContext (e.g. TTS playback)
-  get audioContext() { return this.#getCtx(); }
-
-  #play(sound) {
+  play(sound) {
     if (!this.#enabled) return;
     if (sound === "add") this.#playAdd();
     else if (sound === "complete") this.#playComplete();
@@ -68,28 +66,31 @@ class SfxEngine extends HTMLElement {
     });
   }
 }
-customElements.define("sfx-engine", SfxEngine);
 
 // =========================================================================
-// <particle-fx> : Canvas overlay particle system
+// ParticleFx : Canvas overlay particle system
 //
-// Listens: "particles-spawn" on document (detail: { x, y, count? })
-// Uses the #particle-canvas element in the DOM.
+// Plain class. Constructed with a canvas element reference.
+//
+// Constructor: new ParticleFx(canvasElement)
+// Methods:
+//   spawn(x, y, count?)
 // =========================================================================
-class ParticleFx extends HTMLElement {
-  #canvas = null;
-  #ctx = null;
+
+export class ParticleFx {
+  #canvas;
+  #ctx;
   #particles = [];
   #animId = null;
 
-  connectedCallback() {
-    this.#canvas = document.getElementById("particle-canvas");
-    this.#ctx = this.#canvas.getContext("2d");
+  /**
+   * @param {HTMLCanvasElement} canvas
+   */
+  constructor(canvas) {
+    this.#canvas = canvas;
+    this.#ctx = canvas.getContext("2d");
     this.#resize();
     window.addEventListener("resize", () => this.#resize());
-    document.addEventListener("particles-spawn", (e) => {
-      this.spawn(e.detail.x, e.detail.y, e.detail.count || 12);
-    });
   }
 
   #resize() {
@@ -136,4 +137,3 @@ class ParticleFx extends HTMLElement {
     }
   }
 }
-customElements.define("particle-fx", ParticleFx);
