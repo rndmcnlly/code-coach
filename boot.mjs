@@ -88,12 +88,34 @@ async function boot() {
 
   // ---- Tool dispatch ----
   const toolHandlers = {
-    edit_code: (args) => {
+    edit_text: (args) => {
       const result = editor.editCode(args);
       watcher.resetTracking();
       return result;
     },
+    edit_node: (args) => {
+      const found = watcher.queryNode(args.query, args.index || 0);
+      if (found.error) return found;
+      const result = editor.editCode({
+        startLine: found.startLine,
+        endLine: found.endLine,
+        newText: args.newText,
+      });
+      watcher.resetTracking();
+      return result;
+    },
     highlight_lines: (args) => editor.highlightLines(args),
+    highlight_node: (args) => {
+      const found = watcher.queryNode(args.query, args.index || 0);
+      if (found.error) return found;
+      return editor.highlightLines({
+        startLine: found.startLine,
+        endLine: found.endLine,
+        message: args.message,
+        linkUrl: args.linkUrl,
+        linkLabel: args.linkLabel,
+      });
+    },
     clear_highlights: () => editor.clearHighlights(),
     get_code: () => editor.getCode(),
     suggest_fix: (args) => editor.suggestFix(args),

@@ -75,7 +75,50 @@ export class AstWatcher {
     this.#coachResponding = false;
   }
 
-  /** Reset tracking state after an external edit (e.g. tool edit_code). */
+  /** Expose the language for query construction. */
+  get language() { return this.#language; }
+
+  /**
+   * Find a node by tree-sitter query. Returns the @target capture's line range.
+   * @param {string} queryStr – tree-sitter S-expression query with @target capture
+   * @param {number} [matchIndex=0] – which match to use if multiple
+   * @returns {{ startLine: number, endLine: number, text: string } | { error: string }}
+   */
+  queryNode(queryStr, matchIndex = 0) {
+    if (!this.#ready || !this.#editor) return { error: "Parser not ready" };
+
+    const code = this.#editor.getValue();
+    const tree = this.#parser.parse(code);
+    if (!tree) return { error: "Failed to parse code" };
+
+    let query;
+    try {
+      query = this.#language.query(queryStr);
+    } catch (e) {
+      return { error: `Invalid query: ${e.message}` };
+    }
+
+    const matches = query.matches(tree.rootNode);
+    if (matches.length === 0) return { error: "Query matched no nodes" };
+    if (matchIndex >= matches.length) {
+      return { error: `Only ${matches.length} match(es), requested index ${matchIndex}` };
+    }
+
+    const match = matches[matchIndex];
+    const targetCapture = match.captures.find(c => c.name === "target");
+    if (!targetCapture) {
+      return { error: "Query has no @target capture. Add @target to the node you want to replace." };
+    }
+
+    const node = targetCapture.node;
+    return {
+      startLine: node.startPosition.row + 1,   // 1-indexed
+      endLine: node.endPosition.row + 1,
+      text: node.text,
+    };
+  }
+
+  /** Reset tracking state after an external edit (e.g. edit_text, edit_node). */
   resetTracking() {
     if (!this.#editor) return;
     this.#lastCode = this.#editor.getValue();

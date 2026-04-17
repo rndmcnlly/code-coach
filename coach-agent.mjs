@@ -14,8 +14,8 @@ const TOOL_DEFS = [
   {
     type: "function",
     function: {
-      name: "edit_code",
-      description: "Replace a range of lines in the editor with new text. Use to fix bugs, insert code, or delete lines. Line numbers are 1-indexed. To insert without replacing, set startLine and endLine to the same line. To delete lines, set newText to empty string.",
+      name: "edit_text",
+      description: "Replace a range of lines in the editor with new text. Low-level line-based edit. Use when you need precise control or when edit_node can't target what you need. Line numbers are 1-indexed. To insert without replacing, set startLine and endLine to the same line. To delete lines, set newText to empty string.",
       parameters: {
         type: "object",
         properties: {
@@ -24,6 +24,30 @@ const TOOL_DEFS = [
           newText: { type: "string", description: "Replacement text (can be multiple lines, or empty to delete)" }
         },
         required: ["startLine", "endLine", "newText"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "edit_node",
+      description: `Replace an AST node found by a tree-sitter query. Preferred over edit_text for structural edits: resilient to line-number drift. The @target capture determines which node gets replaced.
+
+Common query patterns for JavaScript:
+  (function_declaration name: (identifier) @name (#eq? @name "create")) @target
+  (variable_declaration (variable_declarator name: (identifier) @name (#eq? @name "config"))) @target
+  (expression_statement (call_expression function: (member_expression property: (property_identifier) @prop (#eq? @prop "add")))) @target
+  (lexical_declaration (variable_declarator name: (identifier) @name (#eq? @name "game"))) @target
+
+If the query is invalid or matches nothing, you'll get an error. Fall back to edit_text if needed.`,
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Tree-sitter S-expression query. Must include a @target capture for the node to replace." },
+          index: { type: "number", description: "0-based match index if multiple nodes match (default: 0, i.e. first match)" },
+          newText: { type: "string", description: "Replacement text for the matched node" }
+        },
+        required: ["query", "newText"]
       }
     }
   },
@@ -42,6 +66,26 @@ const TOOL_DEFS = [
           linkLabel: { type: "string", description: "Label for the link (defaults to 'docs')" }
         },
         required: ["startLine", "endLine", "message"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "highlight_node",
+      description: `Highlight an AST node found by a tree-sitter query and attach an annotation. Same query syntax as edit_node. Preferred over highlight_lines for structural targets: survives line-number drift.
+
+Uses the same @target capture convention as edit_node.`,
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Tree-sitter S-expression query with @target capture for the node to highlight." },
+          index: { type: "number", description: "0-based match index if multiple nodes match (default: 0)" },
+          message: { type: "string", description: "Short annotation text (plain text, 1-2 sentences)" },
+          linkUrl: { type: "string", description: "Optional documentation URL to include in the annotation" },
+          linkLabel: { type: "string", description: "Label for the link (defaults to 'docs')" }
+        },
+        required: ["query", "message"]
       }
     }
   },
