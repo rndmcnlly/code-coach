@@ -135,19 +135,7 @@ class SpeechIO extends HTMLElement {
 
     micBtn.addEventListener("click", () => this.#toggleMic(micBtn));
 
-    // Space push-to-talk
-    document.addEventListener("keydown", (e) => {
-      if (e.code === "Space" && document.activeElement !== userInput &&
-          !document.activeElement?.closest("#monaco-container")) {
-        e.preventDefault();
-        if (!this.#listening) this.#startMic(micBtn);
-      }
-    });
-    document.addEventListener("keyup", (e) => {
-      if (e.code === "Space" && this.#listening && document.activeElement !== userInput) {
-        this.#stopMic(micBtn);
-      }
-    });
+
   }
 
   #toggleMic(btn) { if (this.#listening) this.#stopMic(btn); else this.#startMic(btn); }

@@ -109,6 +109,20 @@ const TOOL_DEFS = [
   {
     type: "function",
     function: {
+      name: "uncomplete_todo",
+      description: "Mark a completed todo item as not done. Use when you realize a task needs more work, or the student's code regressed.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "The task text (or substring) to mark incomplete" }
+        },
+        required: ["text"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "remove_todo",
       description: "Remove a todo item entirely. Use when a task is no longer relevant.",
       parameters: {
@@ -117,6 +131,21 @@ const TOOL_DEFS = [
           text: { type: "string", description: "The task text (or substring) to remove" }
         },
         required: ["text"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "edit_todo",
+      description: "Edit the text of an existing todo item. Use to fix typos, clarify wording, or update a task description.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "The current task text (or substring) to match" },
+          newText: { type: "string", description: "The replacement text" }
+        },
+        required: ["text", "newText"]
       }
     }
   },

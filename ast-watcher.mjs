@@ -3,7 +3,7 @@
 //
 // Plain class (no DOM dependency). Constructed with config, wired by boot.
 //
-// Constructor: new AstWatcher({ pollMs, stabilityThreshold, debounceMs })
+// Constructor: new AstWatcher({ pollMs, stabilityThreshold, debounceMs, lingerMs })
 // Methods:
 //   async init()                    – load tree-sitter WASM
 //   setEditor(editor)              – bind to anything with getValue/getPosition/getLineContent
@@ -14,6 +14,7 @@
 // Callbacks (set by caller):
 //   onStatus(cls, text)
 //   onCodeContext(message, hasErrors)
+//   onCursorLinger(line, lineContent) – cursor stayed on one line for lingerMs
 // =========================================================================
 
 export class AstWatcher {
@@ -33,21 +34,30 @@ export class AstWatcher {
   #pollMs;
   #stabilityThreshold;
   #debounceMs;
+  #lingerMs;
+
+  // Cursor linger tracking
+  #lastCursorLine = -1;
+  #cursorLingerStart = 0;
+  #lastLingerLine = -1;   // last line we fired a linger for (avoid repeats)
 
   // Callbacks – set by the caller (boot.mjs)
   onStatus = () => {};
   onCodeContext = () => {};
+  onCursorLinger = () => {};
 
   /**
    * @param {Object} config
    * @param {number} [config.pollMs=1000]
    * @param {number} [config.stabilityThreshold=2]
    * @param {number} [config.debounceMs=4000]
+   * @param {number} [config.lingerMs=8000] – how long cursor must stay on a line
    */
-  constructor({ pollMs = 1000, stabilityThreshold = 2, debounceMs = 4000 } = {}) {
+  constructor({ pollMs = 1000, stabilityThreshold = 2, debounceMs = 4000, lingerMs = 8000 } = {}) {
     this.#pollMs = pollMs;
     this.#stabilityThreshold = stabilityThreshold;
     this.#debounceMs = debounceMs;
+    this.#lingerMs = lingerMs;
   }
 
   setEditor(editor) { this.#editor = editor; }
@@ -134,7 +144,34 @@ export class AstWatcher {
     } else {
       this.#lastCode = code;
       this.#stableCount = 0;
+      this.#lastLingerLine = -1;   // code changed, reset linger memory
       this.onStatus("editing", "Editing...");
+    }
+
+    // Cursor linger detection (independent of code changes)
+    this.#checkCursorLinger();
+  }
+
+  #checkCursorLinger() {
+    if (this.#coachResponding) return;
+    const pos = this.#editor.getPosition();
+    if (!pos) return;
+    const line = pos.lineNumber;
+    const now = Date.now();
+
+    if (line !== this.#lastCursorLine) {
+      // Cursor moved to a different line
+      this.#lastCursorLine = line;
+      this.#cursorLingerStart = now;
+    } else if (
+      line !== this.#lastLingerLine &&
+      now - this.#cursorLingerStart >= this.#lingerMs &&
+      now - this.#lastCoachTime >= this.#debounceMs
+    ) {
+      // Cursor has lingered on this line long enough
+      this.#lastLingerLine = line;
+      const content = this.#editor.getLineContent(line);
+      this.onCursorLinger(line, content);
     }
   }
 

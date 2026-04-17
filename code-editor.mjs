@@ -290,12 +290,6 @@ class CodeEditor extends HTMLElement {
         glyphMargin: true,
       });
 
-      // Selection changes
-      this.#editor.onDidChangeCursorSelection(() => {
-        const sel = this.getSelection();
-        document.dispatchEvent(new CustomEvent("selection-changed", { detail: sel }));
-      });
-
       // Glyph margin click to dismiss annotation
       this.#editor.onMouseDown((e) => {
         if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN && this.#activeAnnotation) {

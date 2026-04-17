@@ -41,6 +41,7 @@ async function boot() {
     pollMs: 1000,
     stabilityThreshold: 2,
     debounceMs: 4000,
+    lingerMs: 8000,
   });
 
   // ---- Wire SFX button ----
@@ -105,7 +106,9 @@ async function boot() {
       if (result.success) sfx.play("complete");
       return result;
     },
+    uncomplete_todo: (args) => todoList.uncompleteTodo(args),
     remove_todo: (args) => todoList.removeTodo(args),
+    edit_todo: (args) => todoList.editTodo(args),
     run_preview: () => {
       const result = preview.run(editor.getValue());
       requestAnimationFrame(() => {
@@ -177,6 +180,18 @@ async function boot() {
       },
     });
   }
+
+  // ---- Cursor linger -> Agent ----
+  watcher.onCursorLinger = async (line, lineContent) => {
+    const code = editor.getValue();
+    const numbered = code.split("\n").map((l, i) => `${i + 1}: ${l}`).join("\n");
+    const message = `[Student's cursor has been lingering on line ${line} for a while]\n`
+      + `Line content: ${lineContent.trim()}\n`
+      + `\nThis may indicate they are stuck, confused, or studying this section. `
+      + `If appropriate, offer a brief observation or ask if they need help. Don't be pushy.\n`
+      + `\nCurrent code:\n\`\`\`\n${numbered}\n\`\`\``;
+    await sendToAgent(message);
+  };
 
   // ---- Watcher -> Agent ----
   watcher.onCodeContext = async (message, hasErrors) => {
@@ -257,6 +272,32 @@ async function boot() {
   document.addEventListener("quickfix-dismissed", async (e) => {
     chat.addMessage("system", `Dismissed quick-fix on L${e.detail.line}.`);
     await sendToAgent(`[Student dismissed quick-fix on line ${e.detail.line}: "${e.detail.message}"]`);
+  });
+
+  // ---- User todo interactions ----
+  document.addEventListener("user-todo-add", async (e) => {
+    sfx.play("add");
+    chat.addMessage("system", `You added: ${e.detail.text}`);
+    await sendToAgent(`[Student added todo: "${e.detail.text}"]\n\nTodo list:\n${todoList.summary()}`);
+  });
+
+  document.addEventListener("user-todo-toggle", async (e) => {
+    const { text, done } = e.detail;
+    const action = done ? "completed" : "uncompleted";
+    chat.addMessage("system", `You ${action}: ${text}`);
+    if (done) sfx.play("complete");
+    await sendToAgent(`[Student ${action} todo item: "${text}"]\n\nTodo list:\n${todoList.summary()}`);
+  });
+
+  document.addEventListener("user-todo-remove", async (e) => {
+    chat.addMessage("system", `Removed: ${e.detail.text}`);
+    await sendToAgent(`[Student removed todo: "${e.detail.text}"]\n\nTodo list:\n${todoList.summary()}`);
+  });
+
+  document.addEventListener("user-todo-edit", async (e) => {
+    const { oldText, newText } = e.detail;
+    chat.addMessage("system", `Edited: "${oldText}" \u2192 "${newText}"`);
+    await sendToAgent(`[Student edited todo: "${oldText}" -> "${newText}"]\n\nTodo list:\n${todoList.summary()}`);
   });
 
   // ---- STT transcript -> chat input ----

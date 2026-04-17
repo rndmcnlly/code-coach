@@ -206,7 +206,7 @@
   #todo-header {
     padding: 4px 10px; background: #252526; border-bottom: 1px solid #333;
     font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5px; display: flex; align-items: center;
   }
   #todo-header .todo-count {
     background: #569cd633; color: #569cd6; padding: 0 5px;
@@ -230,6 +230,27 @@
     border-radius: 3px; flex-shrink: 0; display: flex;
     align-items: center; justify-content: center; font-size: 10px;
     margin-top: 1px;
+  }
+  #todo-input {
+    width: 100%; padding: 4px 8px; background: #1e1e1e; border: none;
+    border-top: 1px solid #333; color: #d4d4d4; font-size: 11px;
+    font-family: inherit; outline: none;
+  }
+  #todo-input::placeholder { color: #555; }
+  #todo-input:focus { background: #252526; }
+  .todo-item { cursor: default; }
+  .todo-item:hover { background: rgba(255,255,255,0.05); }
+  .todo-item .todo-check { cursor: pointer; }
+  .todo-item .todo-text { cursor: default; }
+  .todo-item .todo-remove {
+    margin-left: auto; color: #555; cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 0 2px;
+  }
+  .todo-item .todo-remove:hover { color: #e06c75; }
+  .todo-edit-input {
+    flex: 1; background: #1e1e1e; border: 1px solid #569cd6;
+    color: #d4d4d4; font-size: 11px; font-family: inherit;
+    padding: 0 4px; outline: none; border-radius: 2px;
   }
   .todo-item.done .todo-check {
     background: #6a995533; border-color: #6a9955; color: #6a9955;
@@ -301,6 +322,7 @@
   <div id="todo-pane">
     <div id="todo-header">Tasks <span class="todo-count" id="todo-count">0</span></div>
     <div id="todo-items"></div>
+    <input id="todo-input" type="text" placeholder="Add a task..." />
   </div>
   <div id="coach-pane">
     <div id="coach-header">Log</div>
