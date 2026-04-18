@@ -1,67 +1,60 @@
 // =========================================================================
-// <code-editor> : Monaco editor + decorations + annotations + quick-fix
+// <code-editor> : Monaco editor + multi-tab + decorations + quick-fix
 //
-// Methods:
-//   getValue()                      – current source text
-//   getPosition()                   – {lineNumber, column}
-//   getSelection()                  – Monaco Selection or null
-//   getLineContent(n)               – text of line n
-//   getLineCount()                  – total lines
-//   editCode({startLine, endLine, newText})
-//   highlightLines({startLine, endLine, message, linkUrl?, linkLabel?})
+// Each tab has an associated file path and its own Monaco ITextModel.
+// Tabs can be dirty (unsaved edits relative to the FileStore).
+//
+// Public API (called by boot.mjs):
+//   openTab(path, content, language)  – open or focus a tab
+//   closeTab(path)                    – close a tab (no save prompt)
+//   getActiveTab()                    – { path, dirty } | null
+//   listTabs()                        – [{ path, dirty, active }]
+//   getValue(path?)                   – content of tab (active if omitted)
+//   setValue(path, content)           – set content without marking dirty
+//   getPosition()                     – {lineNumber, column}
+//   getSelection()                    – { startLine, endLine, text } | null
+//   getLineContent(n)                 – text of line n (active tab)
+//   getLineCount()                    – total lines (active tab)
+//   getCode(path)                     – numbered source for LLM context
+//   editCode({ tab_path, startLine, endLine, newText })
+//   highlightLines({ tab_path, startLine, endLine, message, linkUrl?, linkLabel? })
 //   clearHighlights()
-//   getCode()                       – numbered source for LLM context
-//   suggestFix({line, oldText, newText, message})
-//   getLineScreenPos(lineNumber)    – {x,y} in viewport coords
+//   suggestFix({ tab_path, line, oldText, newText, message })
+//   getLineScreenPos(lineNumber)       – {x,y} in viewport coords
+//
 // Events dispatched on document:
-//   "code-changed"                  – detail: { code }
-//   "selection-changed"             – detail: { startLine, endLine, text } | null
-//   "annotation-dismissed"          – detail: { startLine, endLine, message }
-//   "quickfix-applied"              – detail: { line, message }
-//   "quickfix-dismissed"            – detail: { line, message }
+//   "tab-changed"         – detail: { path } (active tab switched)
+//   "code-changed"        – detail: { path, code }
+//   "selection-changed"   – detail: { startLine, endLine, text } | null
+//   "annotation-dismissed"– detail: { tab_path, startLine, endLine, message }
+//   "quickfix-applied"    – detail: { tab_path, line, message }
+//   "quickfix-dismissed"  – detail: { tab_path, line, message }
 // =========================================================================
+
 function escapeHtml(str) {
   const d = document.createElement("div");
   d.textContent = str;
   return d.innerHTML;
 }
 
-const STARTER_CODE = `// Welcome to Code Coach!
-// Start building your Phaser 4 game here.
-// The coach will react as you code.
-
-const config = {
-  type: Phaser.AUTO,
-  width: 800,
-  height: 600,
-  scene: {
-    preload: preload,
-    create: create,
-    update: update
-  }
-};
-
-const game = new Phaser.Game(config);
-
-function preload() {
-  // Load your assets here
-}
-
-function create() {
-  // Set up your game objects here
-}
-
-function update() {
-  // Game loop logic here
-}
-`;
-
 class CodeEditor extends HTMLElement {
+  // Monaco editor instance (single shared editor, models swap on tab switch)
   #editor = null;
+  #monacoContainer = null; // direct reference to avoid getElementById races
+
+  // Tab state: Map<path, { model, dirty }>
+  #tabs = new Map();
+  #activePath = null;
+
+  // Decoration/annotation state (per active tab -- cleared on tab switch)
   #activeDecorations = [];
   #annotationStyleEl = null;
   #activeAnnotation = null;
   #activeQuickFix = null;
+
+  // Tab bar DOM element (rendered inside this element)
+  #tabBar = null;
+
   #initResolve = null;
   #initPromise = null;
 
@@ -70,52 +63,194 @@ class CodeEditor extends HTMLElement {
     this.#initPromise = new Promise(r => { this.#initResolve = r; });
   }
 
-  /** Resolves when Monaco is loaded and editor is ready. */
   get ready() { return this.#initPromise; }
 
   connectedCallback() {
+    // Tab bar + Monaco container are both children of this element.
+    // The element itself must fill its flex slot (see CSS in index.html).
+    this.style.display = "flex";
+    this.style.flexDirection = "column";
+    this.style.flex = "1";
+    this.style.minHeight = "0";
+    this.style.overflow = "hidden";
+
+    this.#tabBar = document.createElement("div");
+    this.#tabBar.id = "tab-bar";
+    this.appendChild(this.#tabBar);
+
+    // Create Monaco container as a child instead of relying on external div
+    this.#monacoContainer = document.createElement("div");
+    this.#monacoContainer.id = "monaco-container";
+    this.#monacoContainer.style.flex = "1";
+    this.#monacoContainer.style.minHeight = "0";
+    this.appendChild(this.#monacoContainer);
+
     this.#initMonaco();
   }
 
-  // ---- Public API ----
+  // ---- Tab management ----
 
-  getValue() { return this.#editor?.getValue() ?? ""; }
+  /**
+   * Open a file in a new tab (or focus it if already open).
+   * @param {string} path
+   * @param {string} content
+   * @param {string} language  – Monaco language id
+   */
+  openTab(path, content, language = "plaintext") {
+    if (this.#tabs.has(path)) {
+      this.#switchTo(path);
+      return { success: true, note: `Tab already open: ${path}` };
+    }
+    if (!this.#editor) return { error: "Editor not ready" };
+    const model = monaco.editor.createModel(content, language);
+    // Track content changes to mark dirty
+    model.onDidChangeContent(() => {
+      const tab = this.#tabs.get(path);
+      if (tab && !tab.dirty) {
+        tab.dirty = true;
+        this.#renderTabBar();
+      }
+      if (this.#activePath === path) {
+        document.dispatchEvent(new CustomEvent("code-changed", {
+          detail: { path, code: model.getValue() }
+        }));
+      }
+    });
+    this.#tabs.set(path, { model, dirty: false });
+    this.#switchTo(path);
+    return { success: true };
+  }
+
+  closeTab(path) {
+    if (!this.#tabs.has(path)) return { error: `Tab not open: ${path}` };
+    const { model } = this.#tabs.get(path);
+    const wasActive = this.#activePath === path;
+    this.#tabs.delete(path);
+    model.dispose();
+    if (wasActive) {
+      // Switch to last remaining tab, or clear editor
+      const remaining = [...this.#tabs.keys()];
+      if (remaining.length > 0) {
+        this.#switchTo(remaining[remaining.length - 1]);
+      } else {
+        this.#activePath = null;
+        this.clearHighlights();
+        this.#editor?.setModel(null);
+      }
+    }
+    this.#renderTabBar();
+    return { success: true };
+  }
+
+  getActiveTab() {
+    if (!this.#activePath) return null;
+    const tab = this.#tabs.get(this.#activePath);
+    return tab ? { path: this.#activePath, dirty: tab.dirty } : null;
+  }
+
+  listTabs() {
+    return [...this.#tabs.entries()].map(([path, { dirty }]) => ({
+      path,
+      dirty,
+      active: path === this.#activePath,
+    }));
+  }
+
+  // ---- Content API ----
+
+  getValue(path) {
+    const p = path ?? this.#activePath;
+    if (!p) return "";
+    return this.#tabs.get(p)?.model.getValue() ?? "";
+  }
+
+  /** Set content without marking the tab dirty (used for initial load / save sync). */
+  setValue(path, content) {
+    const tab = this.#tabs.get(path);
+    if (!tab) return { error: `Tab not open: ${path}` };
+    // Temporarily suppress dirty flagging
+    tab._suppressDirty = true;
+    tab.model.setValue(content);
+    tab.dirty = false;
+    tab._suppressDirty = false;
+    this.#renderTabBar();
+    return { success: true };
+  }
+
+  markClean(path) {
+    const tab = this.#tabs.get(path);
+    if (!tab) return { error: `Tab not open: ${path}` };
+    tab.dirty = false;
+    this.#renderTabBar();
+    return { success: true };
+  }
+
   getPosition() { return this.#editor?.getPosition(); }
-  getLineCount() { return this.#editor?.getModel()?.getLineCount() ?? 0; }
-  getLineContent(n) { return this.#editor?.getModel()?.getLineContent(n) ?? ""; }
+  getLineCount() {
+    const tab = this.#tabs.get(this.#activePath);
+    return tab?.model.getLineCount() ?? 0;
+  }
+  getLineContent(n) {
+    const tab = this.#tabs.get(this.#activePath);
+    return tab?.model.getLineContent(n) ?? "";
+  }
 
   getSelection() {
     if (!this.#editor) return null;
     const sel = this.#editor.getSelection();
     if (!sel || sel.isEmpty()) return null;
-    const text = this.#editor.getModel().getValueInRange(sel);
+    const model = this.#editor.getModel();
+    const text = model?.getValueInRange(sel) ?? "";
     return { startLine: sel.startLineNumber, endLine: sel.endLineNumber, text };
   }
 
   /** Get numbered source code for LLM context. */
-  getCode() {
-    if (!this.#editor) return { error: "Editor not ready" };
-    const code = this.#editor.getValue();
+  getCode(path) {
+    const p = path ?? this.#activePath;
+    if (!p) return { error: "No tab open" };
+    const tab = this.#tabs.get(p);
+    if (!tab) return { error: `Tab not open: ${p}` };
+    const code = tab.model.getValue();
     const numbered = code.split("\n").map((line, i) => `${i + 1}: ${line}`).join("\n");
-    return { code: numbered, lineCount: this.#editor.getModel().getLineCount(), note: "Line numbers are 1-indexed." };
+    return {
+      tab_path: p,
+      code: numbered,
+      lineCount: tab.model.getLineCount(),
+      dirty: tab.dirty,
+      note: "Line numbers are 1-indexed.",
+    };
   }
 
-  editCode({ startLine, endLine, newText }) {
+  editCode({ tab_path, startLine, endLine, newText }) {
     if (!this.#editor) return { error: "Editor not ready" };
-    const model = this.#editor.getModel();
+    const p = tab_path ?? this.#activePath;
+    if (!p) return { error: "No tab open" };
+    const tab = this.#tabs.get(p);
+    if (!tab) return { error: `Tab not open: ${p}` };
+
+    // Bring the target tab into focus so executeEdits works
+    if (p !== this.#activePath) this.#switchTo(p);
+
+    const model = tab.model;
     const totalLines = model.getLineCount();
     startLine = Math.max(1, Math.min(startLine, totalLines));
     endLine = Math.max(startLine, Math.min(endLine, totalLines));
     const range = new monaco.Range(startLine, 1, endLine, model.getLineMaxColumn(endLine));
-    this.#editor.executeEdits("code-coach", [{ range, text: newText, forceMoveMarkers: true }]);
-    return { success: true, linesAffected: `${startLine}-${endLine}`, newLineCount: model.getLineCount() };
+    this.#editor.executeEdits("pair-agent", [{ range, text: newText, forceMoveMarkers: true }]);
+    return { success: true, tab_path: p, linesAffected: `${startLine}-${endLine}`, newLineCount: model.getLineCount() };
   }
 
-  highlightLines({ startLine, endLine, message, linkUrl, linkLabel }) {
+  highlightLines({ tab_path, startLine, endLine, message, linkUrl, linkLabel }) {
     if (!this.#editor) return { error: "Editor not ready" };
+    const p = tab_path ?? this.#activePath;
+    if (!p) return { error: "No tab open" };
+    const tab = this.#tabs.get(p);
+    if (!tab) return { error: `Tab not open: ${p}` };
+
+    if (p !== this.#activePath) this.#switchTo(p);
     this.clearHighlights();
 
-    const model = this.#editor.getModel();
+    const model = tab.model;
     const totalLines = model.getLineCount();
     startLine = Math.max(1, Math.min(startLine, totalLines));
     endLine = Math.max(startLine, Math.min(endLine, totalLines));
@@ -130,7 +265,7 @@ class CodeEditor extends HTMLElement {
     if (this.#annotationStyleEl) this.#annotationStyleEl.remove();
     this.#annotationStyleEl = document.createElement("style");
     this.#annotationStyleEl.textContent = `
-      .coach-inline-annotation::after {
+      .agent-inline-annotation::after {
         content: '${cssContent}';
         color: #569cd6aa; font-style: italic; margin-left: 1.5em;
         font-size: 0.85em; pointer-events: none;
@@ -143,27 +278,26 @@ class CodeEditor extends HTMLElement {
         range: new monaco.Range(startLine, 1, endLine, 1),
         options: {
           isWholeLine: true,
-          className: "coach-highlight-line",
-          glyphMarginClassName: "coach-glyph",
+          className: "agent-highlight-line",
+          glyphMarginClassName: "agent-glyph",
           hoverMessage: { value: hoverMessage, isTrusted: true },
         }
       },
       {
         range: new monaco.Range(startLine, 1, startLine, model.getLineMaxColumn(startLine)),
-        options: { afterContentClassName: "coach-inline-annotation" }
+        options: { afterContentClassName: "agent-inline-annotation" }
       }
     ]);
 
-    this.#activeAnnotation = { startLine, endLine, message };
+    this.#activeAnnotation = { tab_path: p, startLine, endLine, message };
     this.#editor.revealLineInCenterIfOutsideViewport(startLine);
 
-    // Particles at annotation
     requestAnimationFrame(() => {
       const pos = this.getLineScreenPos(startLine);
       if (pos) document.dispatchEvent(new CustomEvent("particles-spawn", { detail: pos }));
     });
 
-    return { success: true, highlighted: `lines ${startLine}-${endLine}` };
+    return { success: true, tab_path: p, highlighted: `lines ${startLine}-${endLine}` };
   }
 
   clearHighlights() {
@@ -176,27 +310,33 @@ class CodeEditor extends HTMLElement {
     return { success: true };
   }
 
-  suggestFix({ line, oldText, newText, message }) {
+  suggestFix({ tab_path, line, oldText, newText, message }) {
     if (!this.#editor) return { error: "Editor not ready" };
+    const p = tab_path ?? this.#activePath;
+    if (!p) return { error: "No tab open" };
+    const tab = this.#tabs.get(p);
+    if (!tab) return { error: `Tab not open: ${p}` };
+
+    if (p !== this.#activePath) this.#switchTo(p);
     this.#clearQuickFix();
 
-    const model = this.#editor.getModel();
+    const model = tab.model;
     const totalLines = model.getLineCount();
     line = Math.max(1, Math.min(line, totalLines));
     const lineContent = model.getLineContent(line);
-    if (!lineContent.includes(oldText)) return { error: `"${oldText}" not found on line ${line}` };
+    if (!lineContent.includes(oldText)) return { error: `"${oldText}" not found on line ${line} of ${p}` };
 
     const decorations = this.#editor.deltaDecorations([], [{
       range: new monaco.Range(line, 1, line, 1),
-      options: { isWholeLine: true, className: "coach-highlight-line" }
+      options: { isWholeLine: true, className: "agent-highlight-line" }
     }]);
 
-    const widgetId = `coach-quickfix-${Date.now()}`;
+    const widgetId = `agent-quickfix-${Date.now()}`;
     const widget = {
       getId: () => widgetId,
       getDomNode: () => {
         const node = document.createElement("div");
-        node.className = "coach-quickfix";
+        node.className = "agent-quickfix";
         node.innerHTML = `
           <span class="qf-msg">${escapeHtml(message)}</span>
           <button class="qf-apply">Apply</button>
@@ -214,8 +354,8 @@ class CodeEditor extends HTMLElement {
 
     this.#editor.addContentWidget(widget);
     this.#editor.revealLineInCenterIfOutsideViewport(line);
-    this.#activeQuickFix = { widget, line, oldText, newText, message, decorations };
-    return { success: true, line, message: `Quick-fix offered on line ${line}. Waiting for student.` };
+    this.#activeQuickFix = { widget, tab_path: p, line, oldText, newText, message, decorations };
+    return { success: true, tab_path: p, line, message: `Quick-fix offered on line ${line}. Waiting for user.` };
   }
 
   getLineScreenPos(lineNumber) {
@@ -227,32 +367,69 @@ class CodeEditor extends HTMLElement {
     return { x: rect.left + topPos.left + 40, y: rect.top + topPos.top + 10 };
   }
 
-  // ---- Private ----
+  // ---- Private: tab switching ----
+
+  #switchTo(path) {
+    if (!this.#tabs.has(path)) return;
+    // Clear decorations from previous tab before switching
+    this.clearHighlights();
+    this.#clearQuickFix();
+
+    this.#activePath = path;
+    const { model } = this.#tabs.get(path);
+    this.#editor.setModel(model);
+    this.#renderTabBar();
+    document.dispatchEvent(new CustomEvent("tab-changed", { detail: { path } }));
+  }
+
+  // ---- Private: tab bar rendering ----
+
+  #renderTabBar() {
+    if (!this.#tabBar) return;
+    this.#tabBar.innerHTML = "";
+    for (const [path, { dirty }] of this.#tabs) {
+      const tab = document.createElement("div");
+      tab.className = "editor-tab" + (path === this.#activePath ? " active" : "");
+      const label = path.split("/").pop(); // show only filename
+      tab.title = path; // full path on hover
+      tab.innerHTML = `<span class="tab-label">${escapeHtml(label)}${dirty ? " \u25CF" : ""}</span>`
+        + `<span class="tab-close" title="Close tab">&#x2715;</span>`;
+      tab.querySelector(".tab-label").addEventListener("click", () => this.#switchTo(path));
+      tab.querySelector(".tab-close").addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.closeTab(path);
+      });
+      this.#tabBar.appendChild(tab);
+    }
+  }
+
+  // ---- Private: quick-fix ----
 
   #applyQuickFix() {
     if (!this.#activeQuickFix) return;
-    const { line, oldText, newText, message } = this.#activeQuickFix;
-    const model = this.#editor.getModel();
+    const { tab_path, line, oldText, newText, message } = this.#activeQuickFix;
+    const model = this.#tabs.get(tab_path)?.model;
+    if (!model) { this.#clearQuickFix(); return; }
     const lineContent = model.getLineContent(line);
     const col = lineContent.indexOf(oldText);
     if (col === -1) {
       this.#clearQuickFix();
       document.dispatchEvent(new CustomEvent("quickfix-applied", {
-        detail: { line, message, error: `text no longer found on line ${line}` }
+        detail: { tab_path, line, message, error: `text no longer found on line ${line}` }
       }));
       return;
     }
     const range = new monaco.Range(line, col + 1, line, col + 1 + oldText.length);
-    this.#editor.executeEdits("code-coach-quickfix", [{ range, text: newText, forceMoveMarkers: true }]);
+    this.#editor.executeEdits("agent-quickfix", [{ range, text: newText, forceMoveMarkers: true }]);
     this.#clearQuickFix();
-    document.dispatchEvent(new CustomEvent("quickfix-applied", { detail: { line, message } }));
+    document.dispatchEvent(new CustomEvent("quickfix-applied", { detail: { tab_path, line, message } }));
   }
 
   #dismissQuickFix() {
     if (!this.#activeQuickFix) return;
-    const { line, message } = this.#activeQuickFix;
+    const { tab_path, line, message } = this.#activeQuickFix;
     this.#clearQuickFix();
-    document.dispatchEvent(new CustomEvent("quickfix-dismissed", { detail: { line, message } }));
+    document.dispatchEvent(new CustomEvent("quickfix-dismissed", { detail: { tab_path, line, message } }));
   }
 
   #clearQuickFix() {
@@ -271,14 +448,24 @@ class CodeEditor extends HTMLElement {
     document.dispatchEvent(new CustomEvent("annotation-dismissed", { detail: dismissed }));
   }
 
+  // ---- Private: Monaco init ----
+
   #initMonaco() {
     require.config({
       paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs" }
     });
     require(["vs/editor/editor.main"], () => {
-      this.#editor = monaco.editor.create(document.getElementById("monaco-container"), {
-        value: STARTER_CODE,
-        language: "javascript",
+      const createEditor = () => {
+      // Replace the container element entirely so Monaco doesn't see a
+      // previously-registered node and return a stale/disposed editor.
+      const fresh = document.createElement("div");
+      fresh.id = "monaco-container";
+      fresh.style.flex = "1";
+      fresh.style.minHeight = "0";
+      this.#monacoContainer.replaceWith(fresh);
+      this.#monacoContainer = fresh;
+      this.#editor = monaco.editor.create(this.#monacoContainer, {
+        model: null, // no model until first tab is opened
         theme: "vs-dark",
         fontSize: 14,
         minimap: { enabled: false },
@@ -303,17 +490,43 @@ class CodeEditor extends HTMLElement {
       // Inject decoration styles
       const styleEl = document.createElement("style");
       styleEl.textContent = `
-        .coach-highlight-line { background: rgba(86, 156, 214, 0.15) !important; }
-        .coach-glyph { cursor: pointer !important; }
-        .coach-glyph::before {
+        .agent-highlight-line { background: rgba(86, 156, 214, 0.15) !important; }
+        .agent-glyph { cursor: pointer !important; }
+        .agent-glyph::before {
           content: '\\2715'; color: #569cd688; font-size: 12px;
           line-height: 19px; display: block; text-align: center;
         }
-        .coach-glyph:hover::before { color: #f44747; }
+        .agent-glyph:hover::before { color: #f44747; }
+
+        #tab-bar {
+          display: flex; overflow-x: auto; background: #252526;
+          border-bottom: 1px solid #333; flex-shrink: 0;
+          scrollbar-width: none;
+        }
+        #tab-bar::-webkit-scrollbar { display: none; }
+        .editor-tab {
+          display: flex; align-items: center; gap: 4px;
+          padding: 4px 12px; font-size: 12px; color: #888;
+          border-right: 1px solid #333; cursor: pointer;
+          white-space: nowrap; user-select: none; flex-shrink: 0;
+        }
+        .editor-tab:hover { background: #2d2d2d; color: #ccc; }
+        .editor-tab.active { background: #1e1e1e; color: #d4d4d4; border-bottom: 1px solid #569cd6; }
+        .tab-close {
+          font-size: 10px; color: #666; padding: 0 2px;
+          border-radius: 2px; line-height: 1;
+        }
+        .tab-close:hover { color: #f44747; background: #3a3a3a; }
       `;
       document.head.appendChild(styleEl);
 
       this.#initResolve();
+      }; // end createEditor
+
+      // The AMD loader may fire synchronously (Monaco already cached) before the
+      // browser has done a layout pass. setTimeout(0) guarantees we are past the
+      // current call stack and the container has nonzero dimensions.
+      setTimeout(() => createEditor(), 0);
     });
   }
 }

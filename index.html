@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Code Coach: Live Programming Guide</title>
+<title>Pair Agent</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -26,15 +26,15 @@
   #ast-status.editing { background: #6644; color: #ce9178; }
   #ast-status.stable { background: #2644; color: #6a9955; }
   #ast-status.error { background: #4224; color: #f44747; }
-  #coach-status {
+  #agent-status {
     padding: 2px 8px; border-radius: 10px; font-size: 11px;
     background: transparent; color: transparent; transition: all 0.3s;
   }
-  #coach-status.thinking {
+  #agent-status.thinking {
     background: #264f7844; color: #569cd6;
-    animation: coach-pulse 1.5s ease-in-out infinite;
+    animation: agent-pulse 1.5s ease-in-out infinite;
   }
-  @keyframes coach-pulse {
+  @keyframes agent-pulse {
     0%, 100% { opacity: 0.6; }
     50% { opacity: 1; }
   }
@@ -45,23 +45,76 @@
   }
   #topbar button:hover { background: #444; }
   #topbar button.active { background: #264f78; border-color: #569cd6; }
+  #topbar button#open-dir-btn {
+    background: #1a3a1a; border-color: #6a9955; color: #6a9955;
+  }
+  #topbar button#open-dir-btn:hover { background: #224a22; }
   #topbar select {
     background: #333; border: 1px solid #555; color: #d4d4d4;
     padding: 3px 6px; border-radius: 4px; font-size: 12px; cursor: pointer;
   }
+  /* AGENTS.md checkbox row */
+  #agents-md-label {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; color: #666; cursor: pointer; white-space: nowrap;
+  }
+  #agents-md-label:hover { color: #aaa; }
+  #agents-md-check { accent-color: #569cd6; cursor: pointer; }
 
   /* Main layout */
   #main { display: flex; flex: 1; overflow: hidden; }
 
+  /* File browser sidebar */
+  file-browser {
+    width: 180px; background: #1e1e1e;
+    border-right: 1px solid #333; flex-shrink: 0;
+    transition: width 0.15s ease; overflow: hidden;
+  }
+  file-browser.collapsed { width: 28px; }
+  file-browser.collapsed #file-tree { display: none; }
+  #file-browser-header {
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px 8px; background: #252526; border-bottom: 1px solid #333;
+    font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase;
+    letter-spacing: 0.5px; cursor: pointer; user-select: none; flex-shrink: 0;
+  }
+  #file-browser-header:hover { color: #aaa; }
+  file-browser.collapsed #file-browser-header .panel-label {
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font-size: 10px; letter-spacing: 1px; padding: 6px 0;
+  }
+  #file-tree {
+    flex: 1; overflow-y: auto; overflow-x: hidden;
+    padding: 4px 0;
+  }
+  .file-row {
+    display: flex; align-items: center; gap: 5px;
+    padding: 2px 8px; font-size: 12px; color: #aaa;
+    cursor: pointer; white-space: nowrap; user-select: none;
+  }
+  .file-row:hover { background: rgba(255,255,255,0.06); color: #d4d4d4; }
+  .file-row.active { background: #264f7833; color: #9cdcfe; }
+  .file-row.dir { color: #e2c08d; }
+  .file-row.dir:hover { color: #f0d09f; }
+  .file-icon { flex-shrink: 0; font-size: 10px; }
+  .file-ext-badge {
+    font-size: 9px; font-weight: 700; color: #555;
+    font-family: 'Cascadia Code', monospace;
+  }
+  .file-name { overflow: hidden; text-overflow: ellipsis; }
+
   /* Editor pane (top: code, bottom: preview) */
   #editor-pane { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
-  #monaco-container { flex: 3; min-height: 0; }
+  code-editor { flex: 3; min-height: 0; overflow: hidden; }
 
   /* Game preview area */
   #preview-area {
     flex: 2; display: flex; flex-direction: column; min-height: 0;
-    border-top: 1px solid #333;
+    border-top: 1px solid #333; transition: flex 0.15s ease;
   }
+  #preview-area.collapsed { flex: 0 0 auto; }
+  #preview-area.collapsed #game-iframe,
+  #preview-area.collapsed #console-area { display: none; }
   #preview-bar {
     display: flex; align-items: center; gap: 8px;
     padding: 3px 10px; background: #252526; border-bottom: 1px solid #333;
@@ -73,8 +126,6 @@
     font-weight: 600;
   }
   #preview-bar button:hover { background: #7fbf66; }
-  #preview-bar .auto-label { color: #555; font-size: 10px; }
-  #preview-bar .auto-label input { vertical-align: middle; }
   #game-iframe {
     flex: 1; border: none; background: #000; min-height: 0;
   }
@@ -88,17 +139,22 @@
   .console-line.error { color: #f44747; }
   .console-line.warn { color: #ce9178; }
 
-  /* Coach pane (narrow log sidebar) */
-  #coach-pane {
+  /* Agent pane (narrow log sidebar) */
+  #agent-pane {
     width: 280px; display: flex; flex-direction: column;
     border-left: 1px solid #333; background: #1a1a1a;
-    opacity: 0.85;
+    opacity: 0.85; transition: width 0.15s ease;
   }
-  #coach-header {
+  #agent-pane.collapsed { width: 28px; }
+  #agent-pane.collapsed #chat-log,
+  #agent-pane.collapsed #input-area-chat { display: none; }
+  #agent-header {
     padding: 4px 10px; background: #252526; border-bottom: 1px solid #333;
     font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.5px; display: flex; align-items: center;
+    cursor: pointer; user-select: none;
   }
+  #agent-header:hover { color: #aaa; }
   #chat-log {
     flex: 1; overflow-y: auto; padding: 8px 12px;
     display: flex; flex-direction: column; gap: 8px;
@@ -107,7 +163,7 @@
     padding: 4px 8px; border-radius: 4px; font-size: 11px;
     line-height: 1.4; max-width: 100%; word-wrap: break-word;
   }
-  .msg.coach {
+  .msg.agent {
     background: #264f7844; color: #aaa; align-self: flex-start;
     border-left: 2px solid #569cd644;
   }
@@ -119,7 +175,7 @@
     background: transparent; color: #555; align-self: center;
     font-style: italic; font-size: 10px; text-align: center;
   }
-  .msg.coach .label { font-size: 9px; color: #569cd666; margin-bottom: 1px; }
+  .msg.agent .label { font-size: 9px; color: #569cd666; margin-bottom: 1px; }
   .msg.user .label { font-size: 9px; color: #6a995566; margin-bottom: 1px; text-align: right; }
   .msg.context {
     background: #1a1a2e; color: #666; align-self: stretch;
@@ -143,7 +199,7 @@
   .msg.context .ctx-badge.ok { background: #1a3a1a; color: #6a9955; }
   .msg.context .ctx-badge.err { background: #3a1a1a; color: #f44747; }
 
-  /* Input area (below editor) */
+  /* Input area */
   #input-area {
     display: flex; gap: 6px; padding: 6px 12px; align-items: center;
     border-top: 1px solid #333; background: #252526; flex-shrink: 0;
@@ -176,71 +232,68 @@
   }
   #caption-overlay.visible { display: block; }
 
-
-
-  /* Quick-fix widget (inline in editor) */
-  .coach-quickfix {
+  /* Quick-fix widget */
+  .agent-quickfix {
     display: inline-flex; align-items: center; gap: 6px;
     background: #2d2a1a; border: 1px solid #ce917844;
     border-radius: 4px; padding: 2px 8px; font-size: 12px;
     font-family: 'Segoe UI', system-ui, sans-serif;
     color: #ce9178; white-space: nowrap;
   }
-  .coach-quickfix .qf-msg { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
-  .coach-quickfix button {
+  .agent-quickfix .qf-msg { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+  .agent-quickfix button {
     border: none; border-radius: 3px; padding: 1px 8px;
     font-size: 11px; cursor: pointer;
   }
-  .coach-quickfix .qf-apply { background: #6a9955; color: #fff; }
-  .coach-quickfix .qf-apply:hover { background: #7fbf66; }
-  .coach-quickfix .qf-dismiss {
+  .agent-quickfix .qf-apply { background: #6a9955; color: #fff; }
+  .agent-quickfix .qf-apply:hover { background: #7fbf66; }
+  .agent-quickfix .qf-dismiss {
     background: transparent; color: #888; border: 1px solid #555;
   }
-  .coach-quickfix .qf-dismiss:hover { background: #333; color: #ccc; }
+  .agent-quickfix .qf-dismiss:hover { background: #333; color: #ccc; }
 
-  /* Todo pane (middle panel) */
+  /* Todo pane */
   #todo-pane {
-    width: 200px; display: flex; flex-direction: column;
+    width: 220px; display: flex; flex-direction: column;
     border-left: 1px solid #333; background: #1e1e1e;
+    transition: width 0.15s ease;
   }
+  #todo-pane.collapsed { width: 28px; }
+  #todo-pane.collapsed #todo-items,
+  #todo-pane.collapsed #todo-input { display: none; }
   #todo-header {
     padding: 4px 10px; background: #252526; border-bottom: 1px solid #333;
     font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase;
     letter-spacing: 0.5px; display: flex; align-items: center;
+    cursor: pointer; user-select: none;
   }
+  #todo-header:hover { color: #aaa; }
   #todo-header .todo-count {
     background: #569cd633; color: #569cd6; padding: 0 5px;
     border-radius: 8px; font-size: 10px; margin-left: 4px;
   }
-  #todo-items {
-    flex: 1; overflow-y: auto; padding: 6px 10px;
-  }
+  #todo-items { flex: 0 1 auto; max-height: 240px; overflow-y: auto; padding: 6px 10px; }
   #todo-items:empty::after {
-    content: 'Coach will add tasks as you code.';
+    content: 'Agent will add tasks as you code.';
     color: #444; font-style: italic; font-size: 11px;
   }
   .todo-item {
     display: flex; align-items: flex-start; gap: 6px;
     padding: 3px 0; color: #aaa; line-height: 1.4; font-size: 12px;
+    cursor: default;
   }
+  .todo-item:hover { background: rgba(255,255,255,0.05); }
   .todo-item.done { color: #555; }
   .todo-item.done .todo-text { text-decoration: line-through; }
   .todo-item .todo-check {
     width: 14px; height: 14px; border: 1px solid #555;
     border-radius: 3px; flex-shrink: 0; display: flex;
     align-items: center; justify-content: center; font-size: 10px;
-    margin-top: 1px;
+    margin-top: 1px; cursor: pointer;
   }
-  #todo-input {
-    width: 100%; padding: 4px 8px; background: #1e1e1e; border: none;
-    border-top: 1px solid #333; color: #d4d4d4; font-size: 11px;
-    font-family: inherit; outline: none;
+  .todo-item.done .todo-check {
+    background: #6a995533; border-color: #6a9955; color: #6a9955;
   }
-  #todo-input::placeholder { color: #555; }
-  #todo-input:focus { background: #252526; }
-  .todo-item { cursor: default; }
-  .todo-item:hover { background: rgba(255,255,255,0.05); }
-  .todo-item .todo-check { cursor: pointer; }
   .todo-item .todo-text { cursor: default; }
   .todo-item .todo-remove {
     margin-left: auto; color: #555; cursor: pointer;
@@ -252,9 +305,61 @@
     color: #d4d4d4; font-size: 11px; font-family: inherit;
     padding: 0 4px; outline: none; border-radius: 2px;
   }
-  .todo-item.done .todo-check {
-    background: #6a995533; border-color: #6a9955; color: #6a9955;
+  #todo-input {
+    width: 100%; padding: 4px 8px; background: #1e1e1e; border: none;
+    border-top: 1px solid #333; color: #d4d4d4; font-size: 11px;
+    font-family: inherit; outline: none;
   }
+  #todo-input::placeholder { color: #555; }
+  #todo-input:focus { background: #252526; }
+
+  /* Panel collapse */
+  .panel-toggle { font-size: 10px; color: #555; transition: transform 0.15s; display: inline-block; }
+  #todo-pane.collapsed .panel-toggle { transform: rotate(180deg); }
+  #agent-pane.collapsed .panel-toggle { transform: rotate(180deg); }
+  #todo-pane.collapsed .panel-label,
+  #agent-pane.collapsed .panel-label {
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font-size: 10px; letter-spacing: 1px; padding: 6px 0;
+  }
+  #todo-pane.collapsed #todo-count { display: none; }
+
+  /* Blackboard */
+  black-board {
+    display: flex; flex-direction: column; flex: 1; min-height: 0;
+    border-top: 1px solid #333; overflow: hidden;
+  }
+  #blackboard-header {
+    padding: 4px 10px; background: #252526; border-bottom: 1px solid #333;
+    font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase;
+    letter-spacing: 0.5px; flex-shrink: 0;
+  }
+  #blackboard-content {
+    flex: 1; overflow-y: auto; padding: 8px 10px;
+    font-size: 12px; line-height: 1.6; color: #ccc;
+    outline: none; min-height: 60px;
+    /* Rendered markdown styles */
+  }
+  #blackboard-content:empty::before {
+    content: attr(placeholder);
+    color: #444; font-style: italic; pointer-events: none;
+  }
+  #blackboard-content:focus { background: #1a1a2a; }
+  #blackboard-content p { margin: 0 0 6px; }
+  #blackboard-content h1, #blackboard-content h2, #blackboard-content h3 {
+    color: #569cd6; margin: 8px 0 4px; font-size: 12px; font-weight: 700;
+  }
+  #blackboard-content a { color: #9cdcfe; text-decoration: none; }
+  #blackboard-content a:hover { text-decoration: underline; }
+  #blackboard-content strong { color: #d4d4d4; }
+  #blackboard-content em { color: #ce9178; font-style: italic; }
+  #blackboard-content code {
+    background: #2d2d2d; padding: 1px 4px; border-radius: 3px;
+    font-family: 'Cascadia Code', monospace; font-size: 11px; color: #9cdcfe;
+  }
+  #blackboard-content ul { padding-left: 16px; margin: 0 0 6px; }
+  #blackboard-content li { margin: 2px 0; }
+  #blackboard-content hr { border: none; border-top: 1px solid #333; margin: 8px 0; }
 
   /* Tool call indicator in chat */
   .msg.toolcall {
@@ -284,10 +389,20 @@
 <body>
 
 <div id="topbar">
-  <span class="title">Code Coach</span>
+  <span class="title">Pair Agent</span>
   <span id="ast-status">Initializing...</span>
-  <span id="coach-status"></span>
+  <span id="agent-status"></span>
   <span class="spacer"></span>
+  <!-- Persona selector -->
+  <select id="persona-select" title="Agent persona"></select>
+  <!-- AGENTS.md toggle -->
+  <label id="agents-md-label" title="If checked, the agent reads AGENTS.md on startup and follows its instructions">
+    <input id="agents-md-check" type="checkbox" checked>
+    AGENTS.md
+  </label>
+  <!-- Open directory -->
+  <button id="open-dir-btn" title="Open a local project directory">Open Directory</button>
+  <!-- Audio / UI controls -->
   <select id="tts-select" title="Text-to-speech mode">
     <option value="off">Voice: Off</option>
     <option value="browser">Voice: On</option>
@@ -297,44 +412,54 @@
 </div>
 
 <div id="main">
+  <file-browser></file-browser>
   <div id="editor-pane">
-    <div id="monaco-container"></div>
+    <!-- code-editor owns its tab bar and Monaco container internally -->
+    <code-editor></code-editor>
     <div id="input-area">
       <span id="selection-hint"></span>
       <textarea id="user-input" rows="1" placeholder="Select code and ask about it, or just type... (Enter to send)"></textarea>
-      <button id="mic-btn" title="Hold to talk (or press Space)">Mic</button>
+      <button id="mic-btn" title="Hold to talk">Mic</button>
       <button id="send-btn">Send</button>
     </div>
-    <div id="preview-area">
+    <div id="preview-area" class="collapsed">
       <div id="preview-bar">
-        <button id="run-btn" title="Run code in preview (Ctrl+Enter)">Run</button>
-        <span>Preview</span>
+        <button id="run-btn" title="Run active tab in preview (Ctrl+Enter)">Run</button>
+        <span id="preview-label" style="cursor:pointer;user-select:none" title="Toggle preview">Preview &#x25B2;</span>
         <span style="color:#555;font-size:10px">Ctrl+Enter to run</span>
         <span style="flex:1"></span>
-        <button id="screenshot-btn" style="background:#333;color:#9cdcfe" title="Send screenshot to coach">Screenshot</button>
-        <button id="share-logs-btn" style="background:#333;color:#ce9178" title="Send console logs to coach">Share logs</button>
+        <button id="screenshot-btn" style="background:#333;color:#9cdcfe" title="Send screenshot to agent">Screenshot</button>
+        <button id="share-logs-btn" style="background:#333;color:#ce9178" title="Send console logs to agent">Share logs</button>
         <button id="clear-console-btn" style="background:#333;color:#888">Clear console</button>
       </div>
-      <iframe id="game-iframe" sandbox="allow-scripts allow-same-origin"></iframe>
+      <iframe id="game-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-pointer-lock"></iframe>
       <div id="console-area"></div>
     </div>
   </div>
   <div id="todo-pane">
-    <div id="todo-header">Tasks <span class="todo-count" id="todo-count">0</span></div>
+    <div id="todo-header" title="Toggle tasks panel">
+      <span class="panel-label">Tasks</span>
+      <span class="todo-count" id="todo-count">0</span>
+      <span class="panel-toggle" style="margin-left:auto">&#x25C4;</span>
+    </div>
     <div id="todo-items"></div>
     <input id="todo-input" type="text" placeholder="Add a task..." />
+    <black-board></black-board>
   </div>
-  <div id="coach-pane">
-    <div id="coach-header">Log</div>
+  <div id="agent-pane">
+    <div id="agent-header" title="Toggle log panel">
+      <span class="panel-label">Log</span>
+      <span class="panel-toggle" style="margin-left:auto">&#x25C4;</span>
+    </div>
     <div id="chat-log"></div>
   </div>
 </div>
 
 <div id="caption-overlay"></div>
 
-<!-- Custom elements (hidden, no visual output of their own) -->
-<code-editor></code-editor>
+<!-- Hidden custom elements with no direct visual output -->
 <game-preview></game-preview>
+<!-- Note: file-browser and code-editor are in #main, not here -->
 <todo-list></todo-list>
 <coach-chat></coach-chat>
 <speech-io></speech-io>
@@ -342,15 +467,15 @@
 <!-- Monaco Editor from CDN -->
 <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
 
-<!-- Tree-sitter: load pre-built UMD from unpkg -->
+<!-- Tree-sitter: pre-built UMD from unpkg -->
 <script src="https://unpkg.com/web-tree-sitter@0.24.7/tree-sitter.js"></script>
 
-<!-- Sound effects (sfxr) and particles (canvas-confetti) -->
+<!-- Sound effects and particles -->
 <script src="https://sfxr.me/riffwave.js"></script>
 <script src="https://sfxr.me/sfxr.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
 
-<!-- Boot orchestrator loads all component modules and wires them together -->
+<!-- Boot orchestrator -->
 <script type="module" src="./boot.mjs"></script>
 
 </body>

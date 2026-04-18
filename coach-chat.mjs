@@ -63,7 +63,7 @@ class CoachChat extends HTMLElement {
     if (this.#thinkingEl) return;
     this.#thinkingEl = document.createElement("div");
     this.#thinkingEl.className = "msg thinking";
-    this.#thinkingEl.innerHTML = `<div class="label">Coach</div><span class="dot-pulse"><span></span><span></span><span></span></span>`;
+    this.#thinkingEl.innerHTML = `<div class="label">Agent</div><span class="dot-pulse"><span></span><span></span><span></span></span>`;
     this.#chatLog.appendChild(this.#thinkingEl);
     this.#chatLog.scrollTop = this.#chatLog.scrollHeight;
   }
@@ -77,11 +77,12 @@ class CoachChat extends HTMLElement {
   addMessage(role, text) {
     const div = document.createElement("div");
     div.className = `msg ${role}`;
-    if (role === "coach") {
+    if (role === "agent" || role === "coach") {
       let rendered;
       try { rendered = marked.parse(text, { breaks: true, gfm: true }); }
       catch { rendered = escapeHtml(text); }
-      div.innerHTML = `<div class="label">Coach</div>${rendered}`;
+      div.className = "msg agent";
+      div.innerHTML = `<div class="label">Agent</div>${rendered}`;
     } else if (role === "user") {
       div.innerHTML = `<div class="label">You</div>${escapeHtml(text)}`;
     } else {
@@ -128,21 +129,21 @@ class CoachChat extends HTMLElement {
 
     const editor = document.querySelector("code-editor");
     const sel = editor?.getSelection();
-    let messageToCoach = "";
+    let messageToAgent = "";
     let displayText = text;
 
     if (sel) {
       const numbered = sel.text.split("\n").map((line, i) => `${sel.startLine + i}: ${line}`).join("\n");
-      messageToCoach = `[Student selected lines ${sel.startLine}-${sel.endLine} (1-indexed)]\n`;
-      messageToCoach += `Selected code:\n\`\`\`\n${numbered}\n\`\`\`\n\n`;
-      messageToCoach += `Student says: ${text}`;
+      messageToAgent = `[User selected lines ${sel.startLine}-${sel.endLine} (1-indexed)]\n`;
+      messageToAgent += `Selected code:\n\`\`\`\n${numbered}\n\`\`\`\n\n`;
+      messageToAgent += `User says: ${text}`;
       displayText = `[L${sel.startLine}-${sel.endLine}] ${text}`;
     } else {
-      messageToCoach = `Student says: ${text}`;
+      messageToAgent = `User says: ${text}`;
     }
 
     this.addMessage("user", displayText);
-    document.dispatchEvent(new CustomEvent("user-send", { detail: { message: messageToCoach, displayText } }));
+    document.dispatchEvent(new CustomEvent("user-send", { detail: { message: messageToAgent, displayText } }));
   }
 }
 customElements.define("coach-chat", CoachChat);

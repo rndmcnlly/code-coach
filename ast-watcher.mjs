@@ -60,7 +60,17 @@ export class AstWatcher {
     this.#lingerMs = lingerMs;
   }
 
-  setEditor(editor) { this.#editor = editor; }
+  setEditor(editor) {
+    this.#editor = editor;
+  }
+
+  /** Returns true if the active tab is a JS/TS file we can parse. */
+  #activeTabIsParseable() {
+    const tab = this.#editor.getActiveTab?.();
+    if (!tab) return true; // no tab info, assume parseable (legacy)
+    const ext = tab.path.split(".").pop()?.toLowerCase() ?? "";
+    return ["js", "mjs", "cjs", "ts", "tsx", "jsx"].includes(ext);
+  }
   setCoachResponding(v) { this.#coachResponding = v; }
   get lastCoachedCode() { return this.#lastCoachedCode; }
 
@@ -118,11 +128,22 @@ export class AstWatcher {
     };
   }
 
-  /** Reset tracking state after an external edit (e.g. edit_text, edit_node). */
+  /** Reset tracking state after an external edit or tab switch. */
   resetTracking() {
     if (!this.#editor) return;
     this.#lastCode = this.#editor.getValue();
+    this.#lastCoachedCode = this.#lastCode;
+    this.#lastASTSexp = "";
+    this.#lastCoachedSexp = "";
     this.#stableCount = 0;
+    if (this.#activeTabIsParseable()) {
+      const tree = this.#parser.parse(this.#lastCode);
+      if (tree) {
+        this.#lastASTSexp = tree.rootNode.toString();
+        this.#lastCoachedSexp = this.#lastASTSexp;
+      }
+    }
+    this.onStatus("stable", "Ready");
   }
 
   async init() {
@@ -145,11 +166,16 @@ export class AstWatcher {
     if (!this.#editor) return;
     this.#lastCode = this.#editor.getValue();
 
-    const tree = this.#parser.parse(this.#lastCode);
-    if (tree) {
-      this.#lastASTSexp = tree.rootNode.toString();
-      this.#lastCoachedSexp = this.#lastASTSexp;
+    if (this.#activeTabIsParseable()) {
+      const tree = this.#parser.parse(this.#lastCode);
+      if (tree) {
+        this.#lastASTSexp = tree.rootNode.toString();
+        this.#lastCoachedSexp = this.#lastASTSexp;
+        this.#lastCoachedCode = this.#lastCode;
+      }
+    } else {
       this.#lastCoachedCode = this.#lastCode;
+      this.onStatus("stable", "Ready");
     }
 
     setInterval(() => this.#tick(), this.#pollMs);
@@ -157,6 +183,37 @@ export class AstWatcher {
 
   #tick() {
     if (!this.#ready || !this.#editor) return;
+    // Only parse JS/TS files; for others just track text stability without AST diff
+    if (!this.#activeTabIsParseable()) {
+      const code = this.#editor.getValue();
+      if (code !== this.#lastCode) {
+        this.#lastCode = code;
+        this.#stableCount = 0;
+        this.onStatus("editing", "Editing...");
+      } else {
+        if (this.#stableCount < this.#stabilityThreshold) this.#stableCount++;
+        if (this.#stableCount === this.#stabilityThreshold && !this.#coachResponding) {
+          if (code !== this.#lastCoachedCode) {
+            this.onStatus("stable", "Stable \u2014 no new changes");
+            this.#lastCoachedCode = code;
+            this.#lastCoachedSexp = "";
+            const tab = this.#editor.getActiveTab?.();
+            const path = tab?.path ?? "unknown";
+            const numbered = code.split("\n").map((l, i) => `${i + 1}: ${l}`).join("\n");
+            const pos = this.#editor.getPosition();
+            const cursorLine = pos?.lineNumber ?? "unknown";
+            const cursorContent = pos ? this.#editor.getLineContent(pos.lineNumber) : "";
+            const message = `[Code update -- ${path}]\nCursor: line ${cursorLine} (${cursorContent.trim()})\nParse status: skipped (not JS/TS)\n\nCurrent file:\n\`\`\`\n${numbered}\n\`\`\``;
+            this.#coachResponding = true;
+            this.onCodeContext(message, false);
+          } else {
+            this.onStatus("stable", "Stable \u2014 no new changes");
+          }
+        }
+      }
+      this.#checkCursorLinger();
+      return;
+    }
     const code = this.#editor.getValue();
 
     if (code === this.#lastCode) {
@@ -235,7 +292,9 @@ export class AstWatcher {
     const cursorLine = pos ? pos.lineNumber : "unknown";
     const cursorContent = pos ? this.#editor.getLineContent(pos.lineNumber) : "";
 
-    let message = `[Code update]\n`;
+    const tab = this.#editor.getActiveTab?.();
+    const path = tab?.path ?? "unknown";
+    let message = `[Code update -- ${path}]\n`;
     message += `Cursor: line ${cursorLine} (content: ${cursorContent.trim()})\n`;
 
     if (hasErrors) {
